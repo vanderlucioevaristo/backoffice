@@ -1,0 +1,457 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { str, onlyDigits, parseNum, formatDoc, formatMoney, formatQty } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const hoje = new Date().toISOString().slice(0, 10);
+
+const { results: fornecedores } = await db()
+  .prepare('SELECT id, nome, documento FROM parceiros WHERE empresa_id = ? AND eh_fornecedor = 1 AND ativo = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string; documento: string | null }>();
+
+const { results: produtos } = await db()
+  .prepare('SELECT id, codigo, nome, unidade, preco_custo, preco_venda, estoque_atual FROM produtos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; codigo: string | null; nome: string; unidade: string; preco_custo: number; preco_venda: number; estoque_atual: number }>();
+
+type ItemForm = {
+  produto_id: number;
+  quantidade: number;
+  valor_unitario: number;
+  novo_preco_venda: number | null;
+};
+
+let erro = '';
+let cab = {
+  fornecedor_id: 0,
+  numero: '',
+  serie: '1',
+  chave_acesso: '',
+  data_emissao: hoje,
+  data_entrada: hoje,
+  valor_frete: 0,
+  valor_desconto: 0,
+  valor_outros: 0,
+  observacoes: '',
+};
+let itens: ItemForm[] = [];
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  cab = {
+    fornecedor_id: Number(f.get('fornecedor_id')) || 0,
+    numero: str(f, 'numero', 30),
+    serie: str(f, 'serie', 10),
+    chave_acesso: onlyDigits(str(f, 'chave_acesso', 60)),
+    data_emissao: str(f, 'data_emissao', 10) || hoje,
+    data_entrada: str(f, 'data_entrada', 10) || hoje,
+    valor_frete: Math.max(0, parseNum(f.get('valor_frete'), 0)),
+    valor_desconto: Math.max(0, parseNum(f.get('valor_desconto'), 0)),
+    valor_outros: Math.max(0, parseNum(f.get('valor_outros'), 0)),
+    observacoes: str(f, 'observacoes', 2000),
+  };
+
+  const pIds = f.getAll('produto_id').map((x) => Number(x));
+  const qtds = f.getAll('quantidade').map((x) => parseNum(x, 0));
+  const vUnits = f.getAll('valor_unitario').map((x) => parseNum(x, -1));
+  const vVendas = f.getAll('novo_preco_venda').map((x) => String(x ?? '').trim());
+
+  const prodMap = new Map(produtos.map((p) => [p.id, p]));
+  const fornOk = fornecedores.some((fn) => fn.id === cab.fornecedor_id);
+
+  itens = [];
+  for (let i = 0; i < pIds.length; i++) {
+    const pid = pIds[i];
+    if (!pid && !qtds[i]) continue; // linha vazia
+    const pvRaw = vVendas[i];
+    const pv = pvRaw ? parseNum(pvRaw, -1) : null;
+    itens.push({
+      produto_id: pid,
+      quantidade: qtds[i],
+      valor_unitario: vUnits[i],
+      novo_preco_venda: pv,
+    });
+  }
+
+  if (!fornOk) erro = 'Selecione um fornecedor válido.';
+  else if (!cab.numero) erro = 'Informe o número da Nota Fiscal.';
+  else if (cab.chave_acesso && cab.chave_acesso.length !== 44) erro = 'A chave de acesso da NF-e deve ter 44 dígitos.';
+  else if (itens.length === 0) erro = 'Adicione pelo menos um produto à nota fiscal.';
+  else {
+    for (const it of itens) {
+      if (!prodMap.has(it.produto_id)) {
+        erro = 'Selecione um produto previamente cadastrado em todas as linhas.';
+        break;
+      }
+      if (it.quantidade <= 0) {
+        erro = 'A quantidade de cada item deve ser maior que zero.';
+        break;
+      }
+      if (it.valor_unitario < 0) {
+        erro = 'Informe um custo unitário válido para cada item.';
+        break;
+      }
+      if (it.novo_preco_venda !== null && it.novo_preco_venda < 0) {
+        erro = 'O preço de venda não pode ser negativo.';
+        break;
+      }
+    }
+  }
+
+  if (!erro) {
+    const dup = await db()
+      .prepare("SELECT id FROM notas_entrada WHERE empresa_id = ? AND fornecedor_id = ? AND numero = ? AND COALESCE(serie,'') = ?")
+      .bind(u.empresaId, cab.fornecedor_id, cab.numero, cab.serie)
+      .first();
+    if (dup) erro = 'Já foi dada entrada nesta Nota Fiscal para este fornecedor.';
+  }
+
+  if (!erro) {
+    const valorProdutos = itens.reduce((acc, it) => acc + it.quantidade * it.valor_unitario, 0);
+    const valorTotal = Math.max(0, valorProdutos + cab.valor_frete + cab.valor_outros - cab.valor_desconto);
+
+    // 1. Grava o cabeçalho da NF
+    const nf = await db()
+      .prepare(
+        `INSERT INTO notas_entrada
+           (empresa_id, fornecedor_id, numero, serie, chave_acesso, data_emissao, data_entrada,
+            valor_produtos, valor_frete, valor_desconto, valor_outros, valor_total, observacoes, usuario_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      )
+      .bind(
+        u.empresaId,
+        cab.fornecedor_id,
+        cab.numero,
+        cab.serie || null,
+        cab.chave_acesso || null,
+        cab.data_emissao,
+        cab.data_entrada,
+        valorProdutos,
+        cab.valor_frete,
+        cab.valor_desconto,
+        cab.valor_outros,
+        valorTotal,
+        cab.observacoes || null,
+        u.id,
+      )
+      .first<{ id: number }>();
+
+    const notaId = nf!.id;
+
+    // 2. Para cada item: grava item da nota, alimenta o estoque, atualiza preço de compra (e venda, se informado),
+    //    vincula/atualiza o fornecedor no produto e registra movimentação no Kardex.
+    for (const it of itens) {
+      const subtotal = it.quantidade * it.valor_unitario;
+
+      await db()
+        .prepare(
+          `INSERT INTO notas_entrada_itens
+             (empresa_id, nota_id, produto_id, quantidade, valor_unitario, valor_total, novo_preco_venda)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(u.empresaId, notaId, it.produto_id, it.quantidade, it.valor_unitario, subtotal, it.novo_preco_venda)
+        .run();
+
+      const atual = await db()
+        .prepare('SELECT estoque_atual, preco_venda FROM produtos WHERE id = ? AND empresa_id = ?')
+        .bind(it.produto_id, u.empresaId)
+        .first<{ estoque_atual: number; preco_venda: number }>();
+
+      const saldoAnt = Number(atual?.estoque_atual ?? 0);
+      const saldoPost = saldoAnt + it.quantidade;
+      const precoVendaFinal = it.novo_preco_venda !== null ? it.novo_preco_venda : Number(atual?.preco_venda ?? 0);
+
+      await db()
+        .prepare(
+          `UPDATE produtos
+              SET estoque_atual = ?,
+                  preco_custo   = ?,
+                  preco_venda   = ?,
+                  atualizado_em = datetime('now')
+            WHERE id = ? AND empresa_id = ?`,
+        )
+        .bind(saldoPost, it.valor_unitario, precoVendaFinal, it.produto_id, u.empresaId)
+        .run();
+
+      // Atualiza ou cria vínculo produto <-> fornecedor com o último preço e número da NF
+      await db()
+        .prepare(
+          `INSERT INTO produtos_fornecedores
+             (empresa_id, produto_id, fornecedor_id, ultimo_preco, ultimo_nf, data_ultima_nf, preferencial)
+           VALUES (?, ?, ?, ?, ?, ?, 0)
+           ON CONFLICT (empresa_id, produto_id, fornecedor_id)
+           DO UPDATE SET ultimo_preco   = excluded.ultimo_preco,
+                         ultimo_nf      = excluded.ultimo_nf,
+                         data_ultima_nf = excluded.data_ultima_nf`,
+        )
+        .bind(u.empresaId, it.produto_id, cab.fornecedor_id, it.valor_unitario, cab.numero, cab.data_emissao)
+        .run();
+
+      // Registra no histórico de estoque (Kardex)
+      await db()
+        .prepare(
+          `INSERT INTO estoque_movimentacoes
+             (empresa_id, produto_id, tipo, origem, referencia_id, quantidade,
+              saldo_anterior, saldo_posterior, custo_unitario, observacao, usuario_id)
+           VALUES (?, ?, 'E', 'NF_ENTRADA', ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          u.empresaId,
+          it.produto_id,
+          notaId,
+          it.quantidade,
+          saldoAnt,
+          saldoPost,
+          it.valor_unitario,
+          `Entrada NF ${cab.numero}${cab.serie ? '/' + cab.serie : ''}`,
+          u.id,
+        )
+        .run();
+    }
+
+    return Astro.redirect('/notas-entrada?ok=salva');
+  }
+}
+
+const rowsToRender: ItemForm[] =
+  itens.length > 0 ? itens : [{ produto_id: 0, quantidade: 1, valor_unitario: 0, novo_preco_venda: null }];
+---
+<Layout title="Dar entrada em Nota Fiscal" active="notas">
+  <h1>Dar entrada em Nota Fiscal (Compra)</h1>
+  {erro && <div class="msg err">{erro}</div>}
+
+  {fornecedores.length === 0 && (
+    <div class="msg err">
+      Você ainda não possui fornecedores ativos cadastrados. <a href="/clientes/novo">Cadastre um fornecedor primeiro</a>.
+    </div>
+  )}
+  {produtos.length === 0 && (
+    <div class="msg err">
+      Você ainda não possui produtos ativos cadastrados. <a href="/produtos/novo">Cadastre os produtos antes de lançar a NF</a>.
+    </div>
+  )}
+
+  <form method="post" id="form-nf">
+    <div class="card">
+      <h2>Dados da Nota Fiscal</h2>
+      <div class="grid">
+        <div class="c6">
+          <label>Fornecedor *</label>
+          <select name="fornecedor_id" required>
+            <option value="">— Selecione o fornecedor —</option>
+            {fornecedores.map((fn) => (
+              <option value={fn.id} selected={cab.fornecedor_id === fn.id}>
+                {fn.nome}{fn.documento ? ` (${formatDoc(fn.documento)})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div class="c2">
+          <label>Número da NF *</label>
+          <input name="numero" value={cab.numero} required placeholder="000123" />
+        </div>
+        <div class="c2">
+          <label>Série</label>
+          <input name="serie" value={cab.serie} placeholder="1" />
+        </div>
+        <div class="c2">
+          <label>Data de emissão *</label>
+          <input name="data_emissao" type="date" value={cab.data_emissao} required />
+        </div>
+
+        <div class="c3">
+          <label>Data de entrada *</label>
+          <input name="data_entrada" type="date" value={cab.data_entrada} required />
+        </div>
+        <div class="c9" style="grid-column:span 9">
+          <label>Chave de acesso NF-e (44 dígitos, opcional)</label>
+          <input name="chave_acesso" value={cab.chave_acesso} inputmode="numeric" maxlength="54" placeholder="Somente números" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">Produtos da Nota Fiscal</h2>
+        <span class="spacer"></span>
+        <span class="muted" style="font-size:13px">Os produtos precisam estar previamente cadastrados</span>
+        <button type="button" class="btn sec" id="btn-add-item" style="font-size:13px;padding:5px 10px">+ Adicionar produto</button>
+      </div>
+
+      <div class="tbl-wrap">
+        <table id="tbl-itens">
+          <thead>
+            <tr>
+              <th style="width:36%">Produto cadastrado *</th>
+              <th style="width:14%">Quantidade *</th>
+              <th style="width:16%">Custo unit. NF (R$) *</th>
+              <th style="width:14%">Subtotal (R$)</th>
+              <th style="width:16%">Preço venda (R$)</th>
+              <th style="width:4%"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody-itens">
+            {rowsToRender.map((it) => (
+              <tr class="item-row">
+                <td>
+                  <select name="produto_id" class="sel-prod" required>
+                    <option value="">— Selecione um produto —</option>
+                    {produtos.map((pr) => (
+                      <option
+                        value={pr.id}
+                        data-un={pr.unidade}
+                        data-custo={pr.preco_custo}
+                        data-venda={pr.preco_venda}
+                        data-est={pr.estoque_atual}
+                        selected={it.produto_id === pr.id}
+                      >
+                        {pr.codigo ? `[${pr.codigo}] ` : ''}{pr.nome} ({pr.unidade} · est: {formatQty(pr.estoque_atual)})
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input name="quantidade" class="inp-qtd" type="number" step="0.001" min="0.001" value={it.quantidade} required />
+                </td>
+                <td>
+                  <input name="valor_unitario" class="inp-unit" type="number" step="0.01" min="0" value={it.valor_unitario} required />
+                </td>
+                <td>
+                  <input class="inp-sub" readonly tabindex="-1" style="background:#f9fafb;font-weight:600" value="0,00" />
+                </td>
+                <td>
+                  <input
+                    name="novo_preco_venda"
+                    class="inp-venda"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={it.novo_preco_venda ?? ''}
+                    placeholder="Manter atual"
+                    title="Se preenchido, atualiza o preço de venda do produto no cadastro"
+                  />
+                </td>
+                <td>
+                  <button type="button" class="btn sec btn-rm-item" style="padding:4px 8px" title="Remover item">✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Totais e Observações</h2>
+      <div class="grid">
+        <div class="c3">
+          <label>Total dos produtos (R$)</label>
+          <input id="tot-produtos" readonly tabindex="-1" style="background:#f9fafb;font-weight:600" />
+        </div>
+        <div class="c2">
+          <label>Frete (R$)</label>
+          <input name="valor_frete" id="inp-frete" type="number" step="0.01" min="0" value={cab.valor_frete} />
+        </div>
+        <div class="c2">
+          <label>Outras desp. (R$)</label>
+          <input name="valor_outros" id="inp-outros" type="number" step="0.01" min="0" value={cab.valor_outros} />
+        </div>
+        <div class="c2">
+          <label>Desconto (R$)</label>
+          <input name="valor_desconto" id="inp-desc" type="number" step="0.01" min="0" value={cab.valor_desconto} />
+        </div>
+        <div class="c3">
+          <label>Valor total da NF (R$)</label>
+          <input id="tot-nf" readonly tabindex="-1" style="background:#eef2ff;font-weight:700;color:#1e3a8a" />
+        </div>
+        <div class="c12">
+          <label>Observações</label>
+          <textarea name="observacoes" rows="2">{cab.observacoes}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button disabled={fornecedores.length === 0 || produtos.length === 0}>Confirmar entrada e alimentar estoque</button>
+      <a class="btn sec" href="/notas-entrada">Cancelar</a>
+    </div>
+  </form>
+</Layout>
+
+<script is:inline>
+  const tbody = document.getElementById('tbody-itens');
+  const btnAdd = document.getElementById('btn-add-item');
+  const inpFrete = document.getElementById('inp-frete');
+  const inpOutros = document.getElementById('inp-outros');
+  const inpDesc = document.getElementById('inp-desc');
+  const totProd = document.getElementById('tot-produtos');
+  const totNf = document.getElementById('tot-nf');
+
+  const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function recalc() {
+    let somaProd = 0;
+    tbody.querySelectorAll('tr.item-row').forEach((tr) => {
+      const q = parseFloat(tr.querySelector('.inp-qtd').value) || 0;
+      const u = parseFloat(tr.querySelector('.inp-unit').value) || 0;
+      const sub = q * u;
+      somaProd += sub;
+      tr.querySelector('.inp-sub').value = fmt(sub);
+    });
+    const frete = parseFloat(inpFrete.value) || 0;
+    const outros = parseFloat(inpOutros.value) || 0;
+    const desc = parseFloat(inpDesc.value) || 0;
+    const total = Math.max(0, somaProd + frete + outros - desc);
+    totProd.value = fmt(somaProd);
+    totNf.value = fmt(total);
+  }
+
+  // Ao escolher um produto, sugere o último preço de custo e o preço de venda atual
+  tbody.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('sel-prod')) return;
+    const tr = e.target.closest('tr.item-row');
+    const opt = e.target.selectedOptions[0];
+    if (opt && opt.value) {
+      const unitInput = tr.querySelector('.inp-unit');
+      const vendaInput = tr.querySelector('.inp-venda');
+      if (!parseFloat(unitInput.value)) unitInput.value = opt.dataset.custo || 0;
+      if (!vendaInput.value && opt.dataset.venda) vendaInput.value = opt.dataset.venda;
+    }
+    recalc();
+  });
+
+  tbody.addEventListener('input', recalc);
+  [inpFrete, inpOutros, inpDesc].forEach((el) => el.addEventListener('input', recalc));
+
+  btnAdd.addEventListener('click', () => {
+    const first = tbody.querySelector('tr.item-row');
+    const clone = first.cloneNode(true);
+    clone.querySelector('.sel-prod').value = '';
+    clone.querySelector('.inp-qtd').value = '1';
+    clone.querySelector('.inp-unit').value = '0';
+    clone.querySelector('.inp-sub').value = '0,00';
+    clone.querySelector('.inp-venda').value = '';
+    tbody.appendChild(clone);
+    recalc();
+  });
+
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-rm-item');
+    if (!btn) return;
+    const rows = tbody.querySelectorAll('tr.item-row');
+    const tr = btn.closest('tr.item-row');
+    if (rows.length === 1) {
+      tr.querySelector('.sel-prod').value = '';
+      tr.querySelector('.inp-qtd').value = '1';
+      tr.querySelector('.inp-unit').value = '0';
+      tr.querySelector('.inp-venda').value = '';
+    } else {
+      tr.remove();
+    }
+    recalc();
+  });
+
+  recalc();
+</script>

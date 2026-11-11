@@ -1,0 +1,141 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatMoney, formatQty } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const sp = Astro.url.searchParams;
+const q = (sp.get('q') ?? '').trim().slice(0, 100);
+const fornecedorId = Number(sp.get('fornecedor')) || 0;
+const estoque = sp.get('estoque') ?? '';
+const status = sp.get('status') ?? 'ativos';
+const page = Math.max(1, Number(sp.get('p')) || 1);
+const PER = 20;
+
+const { results: fornecedores } = await db()
+  .prepare('SELECT id, nome FROM parceiros WHERE empresa_id = ? AND eh_fornecedor = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string }>();
+
+const where = ['p.empresa_id = ?'];
+const args: unknown[] = [u.empresaId];
+
+if (q) {
+  where.push('(p.nome LIKE ? OR p.codigo LIKE ? OR p.codigo_barras LIKE ? OR p.categoria LIKE ? OR p.marca LIKE ?)');
+  args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+}
+if (fornecedorId > 0) {
+  where.push('EXISTS (SELECT 1 FROM produtos_fornecedores pf WHERE pf.produto_id = p.id AND pf.empresa_id = p.empresa_id AND pf.fornecedor_id = ?)');
+  args.push(fornecedorId);
+}
+if (estoque === 'baixo') where.push('(p.estoque_minimo > 0 AND p.estoque_atual <= p.estoque_minimo)');
+if (estoque === 'zerado') where.push('p.estoque_atual <= 0');
+if (status === 'ativos') where.push('p.ativo = 1');
+if (status === 'inativos') where.push('p.ativo = 0');
+
+const W = where.join(' AND ');
+
+const total = (await db().prepare(`SELECT COUNT(*) n FROM produtos p WHERE ${W}`).bind(...args).first<{ n: number }>())!.n;
+const { results } = await db()
+  .prepare(
+    `SELECT p.id, p.codigo, p.nome, p.categoria, p.marca, p.unidade,
+            p.preco_custo, p.preco_venda, p.estoque_atual, p.estoque_minimo, p.ativo,
+            (SELECT GROUP_CONCAT(pa.nome, ', ')
+               FROM produtos_fornecedores pf
+               JOIN parceiros pa ON pa.id = pf.fornecedor_id AND pa.empresa_id = pf.empresa_id
+              WHERE pf.produto_id = p.id AND pf.empresa_id = p.empresa_id
+              ORDER BY pf.preferencial DESC, pa.nome COLLATE NOCASE) AS fornecedores_nomes
+       FROM produtos p
+      WHERE ${W}
+      ORDER BY p.nome COLLATE NOCASE
+      LIMIT ? OFFSET ?`,
+  )
+  .bind(...args, PER, (page - 1) * PER)
+  .all<any>();
+
+const pages = Math.max(1, Math.ceil(total / PER));
+const link = (p: number) => {
+  const n = new URLSearchParams(sp);
+  n.set('p', String(p));
+  return '?' + n;
+};
+const ok = sp.get('ok');
+---
+<Layout title="Produtos" active="produtos">
+  <div class="row">
+    <h1>Produtos</h1>
+    <span class="spacer"></span>
+    <a class="btn" href="/produtos/novo">+ Novo produto</a>
+  </div>
+  {ok === 'salvo' && <div class="msg ok">Produto salvo.</div>}
+  {ok === 'excluido' && <div class="msg ok">Produto excluído.</div>}
+
+  <form class="card row" method="get">
+    <input name="q" value={q} placeholder="Buscar por nome, código, barras, categoria ou marca" style="flex:2;min-width:220px" />
+    <select name="fornecedor" style="flex:1">
+      <option value="">Todos os fornecedores</option>
+      {fornecedores.map((f) => <option value={f.id} selected={fornecedorId === f.id}>{f.nome}</option>)}
+    </select>
+    <select name="estoque" style="flex:1">
+      <option value="">Qualquer estoque</option>
+      <option value="baixo" selected={estoque === 'baixo'}>Abaixo do mínimo</option>
+      <option value="zerado" selected={estoque === 'zerado'}>Sem estoque (≤ 0)</option>
+    </select>
+    <select name="status" style="flex:1">
+      <option value="ativos" selected={status === 'ativos'}>Ativos</option>
+      <option value="inativos" selected={status === 'inativos'}>Inativos</option>
+      <option value="todos" selected={status === 'todos'}>Todos</option>
+    </select>
+    <button>Filtrar</button>
+  </form>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Produto</th>
+          <th>Fornecedores</th>
+          <th>Custo (NF)</th>
+          <th>Preço Venda</th>
+          <th>Estoque</th>
+          <th>Situação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {results.length === 0 && <tr><td colspan="7" class="muted">Nenhum produto encontrado.</td></tr>}
+        {results.map((r) => {
+          const baixo = r.estoque_minimo > 0 && r.estoque_atual <= r.estoque_minimo;
+          return (
+            <tr>
+              <td class="muted">{r.codigo || '—'}</td>
+              <td>
+                <a href={`/produtos/${r.id}`}>{r.nome}</a>
+                {(r.categoria || r.marca) && (
+                  <div class="muted" style="font-size:12px">
+                    {[r.categoria, r.marca].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </td>
+              <td>{r.fornecedores_nomes || <span class="muted">—</span>}</td>
+              <td>{formatMoney(r.preco_custo)}</td>
+              <td><strong>{formatMoney(r.preco_venda)}</strong></td>
+              <td>
+                {formatQty(r.estoque_atual)} <span class="muted">{r.unidade}</span>
+                {baixo && <span class="tag f" title={`Mínimo: ${formatQty(r.estoque_minimo)}`}>Baixo</span>}
+              </td>
+              <td>{r.ativo ? 'Ativo' : <span class="tag off">Inativo</span>}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager row">
+    <span class="muted">{total} registro(s)</span><span class="spacer"></span>
+    {page > 1 && <a class="btn sec" href={link(page - 1)}>← Anterior</a>}
+    <span class="muted">Página {page} de {pages}</span>
+    {page < pages && <a class="btn sec" href={link(page + 1)}>Próxima →</a>}
+  </div>
+</Layout>

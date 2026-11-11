@@ -1,0 +1,437 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { str, onlyDigits, UNIDADES, parseNum, formatDoc } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const idParam = Astro.params.id!;
+const isNew = idParam === 'novo';
+const id = Number(idParam);
+if (!isNew && !Number.isInteger(id)) return Astro.redirect('/produtos');
+
+// Lista de fornecedores cadastrados na empresa (parceiros com eh_fornecedor = 1)
+const { results: listaFornecedores } = await db()
+  .prepare('SELECT id, nome, nome_fantasia, documento, ativo FROM parceiros WHERE empresa_id = ? AND eh_fornecedor = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string; nome_fantasia: string | null; documento: string | null; ativo: number }>();
+
+type FornVinculo = {
+  fornecedor_id: number;
+  codigo_fornecedor: string;
+  ultimo_preco: number | null;
+  ultimo_nf: string;
+  data_ultima_nf: string;
+  preferencial: number;
+};
+
+let erro = '';
+let p: Record<string, any> = {
+  unidade: 'UN',
+  preco_custo: 0,
+  preco_venda: 0,
+  estoque_atual: 0,
+  estoque_minimo: 0,
+  ativo: 1,
+};
+let vinculos: FornVinculo[] = [];
+
+if (!isNew) {
+  const row = await db().prepare('SELECT * FROM produtos WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).first<any>();
+  if (!row) return Astro.redirect('/produtos');
+  p = row;
+
+  const { results: vincs } = await db()
+    .prepare(
+      `SELECT fornecedor_id, COALESCE(codigo_fornecedor,'') codigo_fornecedor,
+              ultimo_preco, COALESCE(ultimo_nf,'') ultimo_nf, COALESCE(data_ultima_nf,'') data_ultima_nf, preferencial
+         FROM produtos_fornecedores
+        WHERE produto_id = ? AND empresa_id = ?
+        ORDER BY preferencial DESC, id ASC`,
+    )
+    .bind(id, u.empresaId)
+    .all<FornVinculo>();
+  vinculos = vincs;
+}
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+
+  if (f.get('_acao') === 'excluir' && !isNew) {
+    await db().prepare('DELETE FROM produtos WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).run();
+    return Astro.redirect('/produtos?ok=excluido');
+  }
+
+  const unid = str(f, 'unidade', 10).toUpperCase();
+  p = {
+    ...p,
+    codigo: str(f, 'codigo', 50),
+    codigo_barras: str(f, 'codigo_barras', 50),
+    nome: str(f, 'nome', 200),
+    descricao: str(f, 'descricao', 1000),
+    categoria: str(f, 'categoria', 100),
+    marca: str(f, 'marca', 100),
+    unidade: UNIDADES.includes(unid) ? unid : 'UN',
+    ncm: onlyDigits(str(f, 'ncm', 20)),
+    preco_custo: parseNum(f.get('preco_custo'), 0),
+    preco_venda: parseNum(f.get('preco_venda'), 0),
+    estoque_atual: parseNum(f.get('estoque_atual'), 0),
+    estoque_minimo: parseNum(f.get('estoque_minimo'), 0),
+    localizacao: str(f, 'localizacao', 100),
+    observacoes: str(f, 'observacoes', 2000),
+    ativo: f.get('ativo') ? 1 : 0,
+  };
+
+  // Lê os fornecedores enviados no formulário
+  const fIds = f.getAll('fornecedor_id').map((x) => Number(x));
+  const fCodigos = f.getAll('codigo_fornecedor').map((x) => String(x ?? '').trim().slice(0, 60));
+  const fPrecos = f.getAll('ultimo_preco').map((x) => String(x ?? '').trim());
+  const fNfs = f.getAll('ultimo_nf').map((x) => String(x ?? '').trim().slice(0, 40));
+  const fDatas = f.getAll('data_ultima_nf').map((x) => String(x ?? '').trim().slice(0, 10));
+  const prefIdx = Number(f.get('preferencial_idx') ?? -1);
+
+  const validFornSet = new Set(listaFornecedores.map((fn) => fn.id));
+  const seenForn = new Set<number>();
+  vinculos = [];
+
+  for (let i = 0; i < fIds.length; i++) {
+    const fid = fIds[i];
+    if (!fid) continue; // linha em branco
+    if (!validFornSet.has(fid)) {
+      erro = 'Fornecedor selecionado inválido.';
+      break;
+    }
+    if (seenForn.has(fid)) {
+      erro = 'O mesmo fornecedor foi informado mais de uma vez.';
+      break;
+    }
+    seenForn.add(fid);
+    const rawPreco = fPrecos[i];
+    const precoVal = rawPreco ? parseNum(rawPreco, -1) : null;
+    if (precoVal !== null && precoVal < 0) {
+      erro = 'Preço de compra no fornecedor inválido.';
+      break;
+    }
+    vinculos.push({
+      fornecedor_id: fid,
+      codigo_fornecedor: fCodigos[i] ?? '',
+      ultimo_preco: precoVal,
+      ultimo_nf: fNfs[i] ?? '',
+      data_ultima_nf: fDatas[i] ?? '',
+      preferencial: prefIdx === i ? 1 : 0,
+    });
+  }
+  if (vinculos.length > 0 && !vinculos.some((v) => v.preferencial === 1)) {
+    vinculos[0].preferencial = 1;
+  }
+
+  if (!erro) {
+    if (!p.nome) erro = 'Informe o nome do produto.';
+    else if (p.preco_custo < 0 || p.preco_venda < 0) erro = 'Os preços não podem ser negativos.';
+    else if (p.estoque_minimo < 0) erro = 'O estoque mínimo não pode ser negativo.';
+    else if (p.ncm && p.ncm.length !== 8) erro = 'O NCM deve conter 8 dígitos.';
+    else if (p.codigo) {
+      const dup = await db()
+        .prepare('SELECT nome FROM produtos WHERE empresa_id = ? AND codigo = ? AND id <> ?')
+        .bind(u.empresaId, p.codigo, isNew ? 0 : id)
+        .first<{ nome: string }>();
+      if (dup) erro = `Já existe um produto com este código: ${dup.nome}.`;
+    }
+  }
+
+  if (!erro) {
+    const cols = [
+      'codigo','codigo_barras','nome','descricao','categoria','marca','unidade','ncm',
+      'preco_custo','preco_venda','estoque_atual','estoque_minimo','localizacao','observacoes','ativo',
+    ];
+    const vals = cols.map((c) => (typeof p[c] === 'string' && p[c] === '' ? null : p[c]));
+
+    let produtoId = id;
+    if (isNew) {
+      const inserted = await db()
+        .prepare(`INSERT INTO produtos (empresa_id, ${cols.join(',')}) VALUES (?, ${cols.map(() => '?').join(',')}) RETURNING id`)
+        .bind(u.empresaId, ...vals)
+        .first<{ id: number }>();
+      produtoId = inserted!.id;
+    } else {
+      await db()
+        .prepare(`UPDATE produtos SET ${cols.map((c) => `${c} = ?`).join(', ')}, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?`)
+        .bind(...vals, id, u.empresaId)
+        .run();
+      await db().prepare('DELETE FROM produtos_fornecedores WHERE produto_id = ? AND empresa_id = ?').bind(id, u.empresaId).run();
+    }
+
+    for (const vinc of vinculos) {
+      await db()
+        .prepare(
+          `INSERT INTO produtos_fornecedores
+             (empresa_id, produto_id, fornecedor_id, codigo_fornecedor, ultimo_preco, ultimo_nf, data_ultima_nf, preferencial)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          u.empresaId,
+          produtoId,
+          vinc.fornecedor_id,
+          vinc.codigo_fornecedor || null,
+          vinc.ultimo_preco,
+          vinc.ultimo_nf || null,
+          vinc.data_ultima_nf || null,
+          vinc.preferencial,
+        )
+        .run();
+    }
+
+    return Astro.redirect('/produtos?ok=salvo');
+  }
+}
+
+const v = (k: string) => p[k] ?? '';
+const rowsToRender: FornVinculo[] =
+  vinculos.length > 0
+    ? vinculos
+    : [{ fornecedor_id: 0, codigo_fornecedor: '', ultimo_preco: null, ultimo_nf: '', data_ultima_nf: '', preferencial: 1 }];
+---
+<Layout title={isNew ? 'Novo produto' : 'Editar produto'} active="produtos">
+  <h1>{isNew ? 'Novo produto' : 'Editar produto'}</h1>
+  {erro && <div class="msg err">{erro}</div>}
+
+  <form method="post" id="form-produto">
+    <div class="card">
+      <h2>Dados principais</h2>
+      <div class="grid">
+        <div class="c3">
+          <label>Código / SKU</label>
+          <input name="codigo" value={v('codigo')} placeholder="Ex.: PRD-001" />
+        </div>
+        <div class="c4">
+          <label>Código de barras (EAN/GTIN)</label>
+          <input name="codigo_barras" value={v('codigo_barras')} inputmode="numeric" />
+        </div>
+        <div class="c2">
+          <label>Unidade *</label>
+          <select name="unidade">
+            {UNIDADES.map((un) => <option value={un} selected={p.unidade === un}>{un}</option>)}
+          </select>
+        </div>
+        <div class="c3">
+          <label>&nbsp;</label>
+          <label class="check"><input type="checkbox" name="ativo" checked={!!p.ativo} /> Produto ativo</label>
+        </div>
+
+        <div class="c8">
+          <label>Nome / Descrição curta *</label>
+          <input name="nome" value={v('nome')} required />
+        </div>
+        <div class="c4">
+          <label>NCM (8 dígitos)</label>
+          <input name="ncm" value={v('ncm')} inputmode="numeric" maxlength="10" placeholder="00000000" />
+        </div>
+
+        <div class="c4">
+          <label>Categoria / Grupo</label>
+          <input name="categoria" value={v('categoria')} />
+        </div>
+        <div class="c4">
+          <label>Marca / Fabricante</label>
+          <input name="marca" value={v('marca')} />
+        </div>
+        <div class="c4">
+          <label>Localização no estoque</label>
+          <input name="localizacao" value={v('localizacao')} placeholder="Ex.: Corredor A, Prat. 3" />
+        </div>
+
+        <div class="c12">
+          <label>Descrição detalhada</label>
+          <textarea name="descricao" rows="2">{v('descricao')}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Preços e Estoque</h2>
+      <div class="grid">
+        <div class="c3">
+          <label>Preço de compra / custo (R$)</label>
+          <input name="preco_custo" id="inp-custo" type="number" step="0.01" min="0" value={p.preco_custo ?? 0} />
+        </div>
+        <div class="c3">
+          <label>Margem sobre custo (%)</label>
+          <input id="inp-margem" type="number" step="0.01" placeholder="0,00" />
+        </div>
+        <div class="c3">
+          <label>Preço de venda (R$) *</label>
+          <input name="preco_venda" id="inp-venda" type="number" step="0.01" min="0" value={p.preco_venda ?? 0} required />
+        </div>
+        <div class="c3">
+          <label>Lucro unitário estimado</label>
+          <input id="inp-lucro" readonly tabindex="-1" style="background:#f9fafb;color:var(--mu)" />
+        </div>
+
+        <div class="c4">
+          <label>Quantidade em estoque</label>
+          <input name="estoque_atual" type="number" step="0.001" value={p.estoque_atual ?? 0} />
+        </div>
+        <div class="c4">
+          <label>Estoque mínimo (alerta)</label>
+          <input name="estoque_minimo" type="number" step="0.001" min="0" value={p.estoque_minimo ?? 0} />
+        </div>
+        {!isNew && (
+          <div class="c4">
+            <label>&nbsp;</label>
+            <a class="btn sec" href={`/estoque?produto=${id}`}>Ver extrato de estoque (Kardex) →</a>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">Fornecedores deste produto</h2>
+        <span class="spacer"></span>
+        <a class="btn sec" href="/clientes/novo" target="_blank" style="font-size:13px;padding:5px 10px">+ Cadastrar novo fornecedor</a>
+        <button type="button" class="btn sec" id="btn-add-forn" style="font-size:13px;padding:5px 10px">+ Adicionar linha</button>
+      </div>
+      {listaFornecedores.length === 0 ? (
+        <p class="muted" style="margin:0">
+          Nenhum fornecedor cadastrado ainda. <a href="/clientes/novo">Cadastre um parceiro marcando a opção "Fornecedor"</a> para poder vinculá-lo aos produtos.
+        </p>
+      ) : (
+        <div class="tbl-wrap">
+          <table id="tbl-forn">
+            <thead>
+              <tr>
+                <th style="width:32%">Fornecedor (do cadastro)</th>
+                <th style="width:18%">Cód. no fornecedor</th>
+                <th style="width:16%">Últ. preço NF (R$)</th>
+                <th style="width:14%">Nº última NF</th>
+                <th style="width:14%">Data NF</th>
+                <th style="width:6%;text-align:center" title="Fornecedor principal/preferencial">Principal</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody-forn">
+              {rowsToRender.map((row, idx) => (
+                <tr class="forn-row">
+                  <td>
+                    <select name="fornecedor_id">
+                      <option value="">— Selecione um fornecedor —</option>
+                      {listaFornecedores.map((fn) => (
+                        <option value={fn.id} selected={row.fornecedor_id === fn.id}>
+                          {fn.nome}{fn.documento ? ` (${formatDoc(fn.documento)})` : ''}{!fn.ativo ? ' [Inativo]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td><input name="codigo_fornecedor" value={row.codigo_fornecedor} placeholder="Ref./SKU" /></td>
+                  <td><input name="ultimo_preco" type="number" step="0.01" min="0" value={row.ultimo_preco ?? ''} placeholder="0,00" /></td>
+                  <td><input name="ultimo_nf" value={row.ultimo_nf} placeholder="Nº NF" /></td>
+                  <td><input name="data_ultima_nf" type="date" value={row.data_ultima_nf} /></td>
+                  <td style="text-align:center">
+                    <input type="radio" name="preferencial_idx" value={idx} checked={!!row.preferencial} style="width:auto" />
+                  </td>
+                  <td>
+                    <button type="button" class="btn sec btn-rm-forn" style="padding:4px 8px" title="Remover">✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+
+    <div class="card">
+      <h2>Observações</h2>
+      <textarea name="observacoes" rows="3">{v('observacoes')}</textarea>
+    </div>
+
+    <div class="row">
+      <button>Salvar</button>
+      <a class="btn sec" href="/produtos">Cancelar</a>
+      <span class="spacer"></span>
+      {!isNew && (
+        <button class="dg" name="_acao" value="excluir" formnovalidate onclick="return confirm('Excluir este produto definitivamente?')">
+          Excluir
+        </button>
+      )}
+    </div>
+  </form>
+</Layout>
+
+<script is:inline>
+  // Cálculo auxiliar de margem e lucro entre preço de custo e preço de venda
+  const custo = document.getElementById('inp-custo');
+  const margem = document.getElementById('inp-margem');
+  const venda = document.getElementById('inp-venda');
+  const lucro = document.getElementById('inp-lucro');
+
+  function syncFromPrecos() {
+    const c = parseFloat(custo.value) || 0;
+    const v = parseFloat(venda.value) || 0;
+    const l = v - c;
+    lucro.value = l.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    margem.value = c > 0 ? (((v - c) / c) * 100).toFixed(2) : '';
+  }
+  function syncFromMargem() {
+    const c = parseFloat(custo.value) || 0;
+    const m = parseFloat(margem.value);
+    if (!isNaN(m) && c > 0) {
+      venda.value = (c * (1 + m / 100)).toFixed(2);
+      const l = (parseFloat(venda.value) || 0) - c;
+      lucro.value = l.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+  }
+  custo.addEventListener('input', syncFromPrecos);
+  venda.addEventListener('input', syncFromPrecos);
+  margem.addEventListener('input', syncFromMargem);
+  syncFromPrecos();
+
+  // Gerenciamento dinâmico das linhas de fornecedores
+  const tbody = document.getElementById('tbody-forn');
+  const btnAdd = document.getElementById('btn-add-forn');
+
+  function reindexRadios() {
+    if (!tbody) return;
+    const rows = tbody.querySelectorAll('tr.forn-row');
+    let anyChecked = false;
+    rows.forEach((tr, i) => {
+      const r = tr.querySelector('input[type="radio"]');
+      if (r) {
+        r.value = String(i);
+        if (r.checked) anyChecked = true;
+      }
+    });
+    if (!anyChecked && rows.length > 0) {
+      const first = rows[0].querySelector('input[type="radio"]');
+      if (first) first.checked = true;
+    }
+  }
+
+  if (tbody && btnAdd) {
+    btnAdd.addEventListener('click', () => {
+      const first = tbody.querySelector('tr.forn-row');
+      const clone = first.cloneNode(true);
+      clone.querySelectorAll('input, select').forEach((el) => {
+        if (el.type === 'radio') el.checked = false;
+        else el.value = '';
+      });
+      tbody.appendChild(clone);
+      reindexRadios();
+    });
+
+    tbody.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-rm-forn');
+      if (!btn) return;
+      const rows = tbody.querySelectorAll('tr.forn-row');
+      const tr = btn.closest('tr.forn-row');
+      if (rows.length === 1) {
+        tr.querySelectorAll('input, select').forEach((el) => {
+          if (el.type === 'radio') el.checked = true;
+          else el.value = '';
+        });
+      } else {
+        tr.remove();
+      }
+      reindexRadios();
+    });
+  }
+</script>

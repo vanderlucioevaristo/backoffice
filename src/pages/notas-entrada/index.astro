@@ -1,0 +1,131 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatMoney } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const sp = Astro.url.searchParams;
+const q = (sp.get('q') ?? '').trim().slice(0, 80);
+const fornecedorId = Number(sp.get('fornecedor')) || 0;
+const de = sp.get('de') ?? '';
+const ate = sp.get('ate') ?? '';
+const page = Math.max(1, Number(sp.get('p')) || 1);
+const PER = 20;
+
+const { results: fornecedores } = await db()
+  .prepare('SELECT id, nome FROM parceiros WHERE empresa_id = ? AND eh_fornecedor = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string }>();
+
+const where = ['n.empresa_id = ?'];
+const args: unknown[] = [u.empresaId];
+
+if (q) {
+  where.push('(n.numero LIKE ? OR n.chave_acesso LIKE ? OR f.nome LIKE ?)');
+  args.push(`%${q}%`, `%${q}%`, `%${q}%`);
+}
+if (fornecedorId > 0) {
+  where.push('n.fornecedor_id = ?');
+  args.push(fornecedorId);
+}
+if (de) {
+  where.push('n.data_entrada >= ?');
+  args.push(de);
+}
+if (ate) {
+  where.push('n.data_entrada <= ?');
+  args.push(ate);
+}
+
+const W = where.join(' AND ');
+
+const total = (
+  await db()
+    .prepare(`SELECT COUNT(*) c FROM notas_entrada n JOIN parceiros f ON f.id = n.fornecedor_id WHERE ${W}`)
+    .bind(...args)
+    .first<{ c: number }>()
+)!.c;
+
+const { results } = await db()
+  .prepare(
+    `SELECT n.id, n.numero, n.serie, n.data_emissao, n.data_entrada, n.valor_total,
+            f.nome AS fornecedor_nome,
+            (SELECT COUNT(*) FROM notas_entrada_itens i WHERE i.nota_id = n.id AND i.empresa_id = n.empresa_id) AS qtd_itens
+       FROM notas_entrada n
+       JOIN parceiros f ON f.id = n.fornecedor_id AND f.empresa_id = n.empresa_id
+      WHERE ${W}
+      ORDER BY n.data_entrada DESC, n.id DESC
+      LIMIT ? OFFSET ?`,
+  )
+  .bind(...args, PER, (page - 1) * PER)
+  .all<any>();
+
+const pages = Math.max(1, Math.ceil(total / PER));
+const link = (p: number) => {
+  const s = new URLSearchParams(sp);
+  s.set('p', String(p));
+  return '?' + s;
+};
+const ok = sp.get('ok');
+---
+<Layout title="Entrada de Notas Fiscais" active="notas">
+  <div class="row">
+    <h1>Notas Fiscais de Entrada</h1>
+    <span class="spacer"></span>
+    <a class="btn" href="/notas-entrada/nova">+ Dar entrada em NF</a>
+  </div>
+  {ok === 'salva' && <div class="msg ok">Nota fiscal registrada e estoque atualizado com sucesso.</div>}
+  {ok === 'cancelada' && <div class="msg ok">Nota fiscal cancelada e quantidades estornadas do estoque.</div>}
+
+  <form class="card row" method="get">
+    <input name="q" value={q} placeholder="Nº da NF, chave ou fornecedor" style="flex:2;min-width:200px" />
+    <select name="fornecedor" style="flex:2">
+      <option value="">Todos os fornecedores</option>
+      {fornecedores.map((f) => <option value={f.id} selected={fornecedorId === f.id}>{f.nome}</option>)}
+    </select>
+    <input name="de" type="date" value={de} title="Entrada a partir de" style="flex:1" />
+    <input name="ate" type="date" value={ate} title="Entrada até" style="flex:1" />
+    <button>Filtrar</button>
+  </form>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Nº / Série</th>
+          <th>Fornecedor</th>
+          <th>Emissão</th>
+          <th>Entrada</th>
+          <th>Itens</th>
+          <th>Valor Total</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {results.length === 0 && <tr><td colspan="7" class="muted">Nenhuma nota fiscal de entrada registrada.</td></tr>}
+        {results.map((r) => (
+          <tr>
+            <td>
+              <a href={`/notas-entrada/${r.id}`}>
+                <strong>{r.numero}</strong>{r.serie ? ` / ${r.serie}` : ''}
+              </a>
+            </td>
+            <td>{r.fornecedor_nome}</td>
+            <td>{r.data_emissao}</td>
+            <td>{r.data_entrada}</td>
+            <td>{r.qtd_itens}</td>
+            <td><strong>{formatMoney(r.valor_total)}</strong></td>
+            <td><a href={`/notas-entrada/${r.id}`}>Detalhes →</a></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager row">
+    <span class="muted">{total} nota(s)</span><span class="spacer"></span>
+    {page > 1 && <a class="btn sec" href={link(page - 1)}>← Anterior</a>}
+    <span class="muted">Página {page} de {pages}</span>
+    {page < pages && <a class="btn sec" href={link(page + 1)}>Próxima →</a>}
+  </div>
+</Layout>

@@ -29,6 +29,25 @@ export const validEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
 export const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 
+export const UNIDADES = ['UN', 'PC', 'CX', 'KG', 'G', 'LT', 'ML', 'MT', 'M2', 'M3', 'PAR', 'KIT', 'FD', 'RL'];
+
+export function parseNum(v: unknown, def = 0): number {
+  if (v === null || v === undefined) return def;
+  const s = String(v).trim();
+  if (!s) return def;
+  const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : def;
+}
+
+export function formatMoney(n: number | null | undefined): string {
+  return Number(n ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+export function formatQty(n: number | null | undefined): string {
+  return Number(n ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+}
+
 export function formatDoc(d: string | null | undefined) {
   if (!d) return '';
   if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');

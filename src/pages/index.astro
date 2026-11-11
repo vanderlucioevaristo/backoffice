@@ -6,15 +6,24 @@ const c = await db()
   .prepare(`SELECT COUNT(*) total, COALESCE(SUM(eh_cliente),0) clientes, COALESCE(SUM(eh_fornecedor),0) fornecedores
               FROM parceiros WHERE empresa_id = ? AND ativo = 1`)
   .bind(u.empresaId).first<{ total: number; clientes: number; fornecedores: number }>();
+const pr = await db()
+  .prepare(`SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN estoque_minimo > 0 AND estoque_atual <= estoque_minimo THEN 1 ELSE 0 END),0) baixo
+              FROM produtos WHERE empresa_id = ? AND ativo = 1`)
+  .bind(u.empresaId).first<{ total: number; baixo: number }>();
 const erro = Astro.url.searchParams.get('erro') === 'permissao';
 ---
 <Layout title="Início" active="home">
   <h1>Olá, {u.nome}</h1>
   {erro && <div class="msg err">Você não tem permissão para acessar essa área.</div>}
   <div class="grid">
-    <div class="card c4"><div class="muted">Cadastros ativos</div><h1 style="margin:0">{c?.total ?? 0}</h1></div>
-    <div class="card c4"><div class="muted">Clientes</div><h1 style="margin:0">{c?.clientes ?? 0}</h1></div>
-    <div class="card c4"><div class="muted">Fornecedores</div><h1 style="margin:0">{c?.fornecedores ?? 0}</h1></div>
+    <div class="card c3"><div class="muted">Clientes</div><h1 style="margin:0">{c?.clientes ?? 0}</h1></div>
+    <div class="card c3"><div class="muted">Fornecedores</div><h1 style="margin:0">{c?.fornecedores ?? 0}</h1></div>
+    <div class="card c3"><div class="muted">Produtos ativos</div><h1 style="margin:0">{pr?.total ?? 0}</h1></div>
+    <div class="card c3"><div class="muted">Estoque baixo</div><h1 style="margin:0">{pr?.baixo ?? 0}</h1></div>
   </div>
-  <a class="btn" href="/clientes/novo">+ Novo cliente / fornecedor</a>
+  <div class="row">
+    <a class="btn" href="/clientes/novo">+ Novo cliente / fornecedor</a>
+    <a class="btn" href="/produtos/novo">+ Novo produto</a>
+    <a class="btn" href="/notas-entrada/nova">+ Dar entrada em NF</a>
+  </div>
 </Layout>

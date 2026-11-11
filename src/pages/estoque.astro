@@ -1,0 +1,220 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db } from '../lib/auth';
+import { str, parseNum, formatMoney, formatQty } from '../lib/validate';
+
+const u = Astro.locals.user!;
+const sp = Astro.url.searchParams;
+
+let erro = '';
+let okMsg = sp.get('ok') === '1' ? 'Movimentação de estoque registrada.' : '';
+
+const { results: produtos } = await db()
+  .prepare('SELECT id, codigo, nome, unidade, estoque_atual, estoque_minimo, preco_custo FROM produtos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; codigo: string | null; nome: string; unidade: string; estoque_atual: number; estoque_minimo: number; preco_custo: number }>();
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const produtoId = Number(f.get('produto_id')) || 0;
+  const operacao = String(f.get('operacao') ?? ''); // 'E' (entrada), 'S' (saída/baixa), 'A' (definir saldo exato)
+  const valor = parseNum(f.get('quantidade'), -1);
+  const obs = str(f, 'observacao', 300);
+
+  const pr = await db()
+    .prepare('SELECT id, estoque_atual, preco_custo FROM produtos WHERE id = ? AND empresa_id = ?')
+    .bind(produtoId, u.empresaId)
+    .first<{ id: number; estoque_atual: number; preco_custo: number }>();
+
+  if (!pr) erro = 'Selecione um produto válido.';
+  else if (!['E', 'S', 'A'].includes(operacao)) erro = 'Selecione o tipo de operação.';
+  else if ((operacao === 'E' || operacao === 'S') && valor <= 0) erro = 'Informe uma quantidade maior que zero.';
+  else if (operacao === 'A' && valor < 0) erro = 'O saldo de estoque não pode ser negativo.';
+  else if (!obs) erro = 'Informe o motivo / observação da movimentação.';
+  else {
+    const saldoAnt = Number(pr.estoque_atual ?? 0);
+    let saldoPost = saldoAnt;
+    let delta = 0;
+
+    if (operacao === 'E') {
+      delta = valor;
+      saldoPost = saldoAnt + valor;
+    } else if (operacao === 'S') {
+      delta = -valor;
+      saldoPost = saldoAnt - valor;
+    } else {
+      delta = valor - saldoAnt;
+      saldoPost = valor;
+    }
+
+    await db()
+      .prepare("UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+      .bind(saldoPost, pr.id, u.empresaId)
+      .run();
+
+    await db()
+      .prepare(
+        `INSERT INTO estoque_movimentacoes
+           (empresa_id, produto_id, tipo, origem, quantidade, saldo_anterior, saldo_posterior, custo_unitario, observacao, usuario_id)
+         VALUES (?, ?, ?, 'AJUSTE_MANUAL', ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(u.empresaId, pr.id, operacao, delta, saldoAnt, saldoPost, pr.preco_custo, obs, u.id)
+      .run();
+
+    return Astro.redirect(`/estoque?ok=1${sp.get('produto') ? `&produto=${sp.get('produto')}` : ''}`);
+  }
+}
+
+const filtroProduto = Number(sp.get('produto')) || 0;
+const filtroTipo = sp.get('tipo') ?? '';
+const page = Math.max(1, Number(sp.get('p')) || 1);
+const PER = 25;
+
+const where = ['m.empresa_id = ?'];
+const args: unknown[] = [u.empresaId];
+
+if (filtroProduto > 0) {
+  where.push('m.produto_id = ?');
+  args.push(filtroProduto);
+}
+if (['E', 'S', 'A'].includes(filtroTipo)) {
+  where.push('m.tipo = ?');
+  args.push(filtroTipo);
+}
+
+const W = where.join(' AND ');
+const total = (await db().prepare(`SELECT COUNT(*) c FROM estoque_movimentacoes m WHERE ${W}`).bind(...args).first<{ c: number }>())!.c;
+
+const { results: movs } = await db()
+  .prepare(
+    `SELECT m.*, p.codigo, p.nome AS produto_nome, p.unidade, us.nome AS usuario_nome
+       FROM estoque_movimentacoes m
+       JOIN produtos p ON p.id = m.produto_id AND p.empresa_id = m.empresa_id
+       LEFT JOIN usuarios us ON us.id = m.usuario_id AND us.empresa_id = m.empresa_id
+      WHERE ${W}
+      ORDER BY m.id DESC
+      LIMIT ? OFFSET ?`,
+  )
+  .bind(...args, PER, (page - 1) * PER)
+  .all<any>();
+
+const pages = Math.max(1, Math.ceil(total / PER));
+const link = (p: number) => {
+  const s = new URLSearchParams(sp);
+  s.set('p', String(p));
+  return '?' + s;
+};
+---
+<Layout title="Controle de Estoque" active="estoque">
+  <div class="row">
+    <h1>Controle de Estoque</h1>
+    <span class="spacer"></span>
+    <a class="btn" href="/notas-entrada/nova">+ Entrada por Nota Fiscal</a>
+  </div>
+  {erro && <div class="msg err">{erro}</div>}
+  {okMsg && <div class="msg ok">{okMsg}</div>}
+
+  <form method="post" class="card">
+    <h2>Movimentação avulsa / Ajuste de inventário</h2>
+    <div class="grid">
+      <div class="c4">
+        <label>Produto *</label>
+        <select name="produto_id" required>
+          <option value="">— Selecione o produto —</option>
+          {produtos.map((pr) => (
+            <option value={pr.id} selected={filtroProduto === pr.id}>
+              {pr.codigo ? `[${pr.codigo}] ` : ''}{pr.nome} (Atual: {formatQty(pr.estoque_atual)} {pr.unidade})
+            </option>
+          ))}
+        </select>
+      </div>
+      <div class="c3">
+        <label>Operação *</label>
+        <select name="operacao">
+          <option value="S">Saída / Baixa (−)</option>
+          <option value="E">Entrada avulsa (+)</option>
+          <option value="A">Ajustar saldo exato (=)</option>
+        </select>
+      </div>
+      <div class="c2">
+        <label>Quantidade *</label>
+        <input name="quantidade" type="number" step="0.001" min="0" required placeholder="0" />
+      </div>
+      <div class="c3">
+        <label>Motivo / Observação *</label>
+        <input name="observacao" required placeholder="Ex.: Venda balcão, perda, contagem" />
+      </div>
+    </div>
+    <p style="margin:10px 0 0"><button>Registrar movimentação</button></p>
+  </form>
+
+  <form class="card row" method="get">
+    <strong>Histórico de movimentações (Kardex)</strong>
+    <span class="spacer"></span>
+    <select name="produto" style="max-width:280px">
+      <option value="">Todos os produtos</option>
+      {produtos.map((pr) => <option value={pr.id} selected={filtroProduto === pr.id}>{pr.nome}</option>)}
+    </select>
+    <select name="tipo" style="max-width:180px">
+      <option value="">Todos os tipos</option>
+      <option value="E" selected={filtroTipo === 'E'}>Entradas</option>
+      <option value="S" selected={filtroTipo === 'S'}>Saídas / Estornos</option>
+      <option value="A" selected={filtroTipo === 'A'}>Ajustes de saldo</option>
+    </select>
+    <button class="btn sec">Filtrar</button>
+  </form>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Data / Hora</th>
+          <th>Produto</th>
+          <th>Tipo / Origem</th>
+          <th>Movimentação</th>
+          <th>Saldo ant. → post.</th>
+          <th>Custo unit.</th>
+          <th>Observação / Usuário</th>
+        </tr>
+      </thead>
+      <tbody>
+        {movs.length === 0 && <tr><td colspan="7" class="muted">Nenhuma movimentação registrada ainda.</td></tr>}
+        {movs.map((m) => (
+          <tr>
+            <td class="muted" style="white-space:nowrap">{m.criado_em}</td>
+            <td><a href={`/produtos/${m.produto_id}`}>{m.produto_nome}</a></td>
+            <td>
+              {m.tipo === 'E' && <span class="tag">Entrada</span>}
+              {m.tipo === 'S' && <span class="tag f">Saída</span>}
+              {m.tipo === 'A' && <span class="tag off">Ajuste</span>}
+            </td>
+            <td>
+              <strong style={`color:${m.quantidade >= 0 ? 'var(--ok)' : 'var(--dg)'}`}>
+                {m.quantidade >= 0 ? `+${formatQty(m.quantidade)}` : formatQty(m.quantidade)} {m.unidade}
+              </strong>
+            </td>
+            <td class="muted">
+              {formatQty(m.saldo_anterior)} → <strong>{formatQty(m.saldo_posterior)}</strong> {m.unidade}
+            </td>
+            <td>{m.custo_unitario != null ? formatMoney(m.custo_unitario) : '—'}</td>
+            <td>
+              {m.origem === 'NF_ENTRADA' && m.referencia_id ? (
+                <a href={`/notas-entrada/${m.referencia_id}`}>{m.observacao}</a>
+              ) : (
+                m.observacao
+              )}
+              {m.usuario_nome && <span class="muted"> · {m.usuario_nome}</span>}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager row">
+    <span class="muted">{total} movimentação(ões)</span><span class="spacer"></span>
+    {page > 1 && <a class="btn sec" href={link(page - 1)}>← Anterior</a>}
+    <span class="muted">Página {page} de {pages}</span>
+    {page < pages && <a class="btn sec" href={link(page + 1)}>Próxima →</a>}
+  </div>
+</Layout>

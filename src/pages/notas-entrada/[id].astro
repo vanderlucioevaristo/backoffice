@@ -1,0 +1,153 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatDoc, formatMoney, formatQty } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/notas-entrada');
+
+const nota = await db()
+  .prepare(
+    `SELECT n.*, f.nome AS fornecedor_nome, f.documento AS fornecedor_doc, us.nome AS usuario_nome
+       FROM notas_entrada n
+       JOIN parceiros f ON f.id = n.fornecedor_id AND f.empresa_id = n.empresa_id
+       LEFT JOIN usuarios us ON us.id = n.usuario_id AND us.empresa_id = n.empresa_id
+      WHERE n.id = ? AND n.empresa_id = ?`,
+  )
+  .bind(id, u.empresaId)
+  .first<any>();
+
+if (!nota) return Astro.redirect('/notas-entrada');
+
+const { results: itens } = await db()
+  .prepare(
+    `SELECT i.*, p.codigo, p.nome AS produto_nome, p.unidade, p.estoque_atual
+       FROM notas_entrada_itens i
+       JOIN produtos p ON p.id = i.produto_id AND p.empresa_id = i.empresa_id
+      WHERE i.nota_id = ? AND i.empresa_id = ?
+      ORDER BY i.id ASC`,
+  )
+  .bind(id, u.empresaId)
+  .all<any>();
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  if (f.get('_acao') === 'cancelar') {
+    // Estorna as quantidades de cada item no estoque e grava movimentação de saída no Kardex
+    for (const it of itens) {
+      const pr = await db()
+        .prepare('SELECT estoque_atual FROM produtos WHERE id = ? AND empresa_id = ?')
+        .bind(it.produto_id, u.empresaId)
+        .first<{ estoque_atual: number }>();
+      const saldoAnt = Number(pr?.estoque_atual ?? 0);
+      const saldoPost = saldoAnt - Number(it.quantidade);
+
+      await db()
+        .prepare("UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+        .bind(saldoPost, it.produto_id, u.empresaId)
+        .run();
+
+      await db()
+        .prepare(
+          `INSERT INTO estoque_movimentacoes
+             (empresa_id, produto_id, tipo, origem, referencia_id, quantidade,
+              saldo_anterior, saldo_posterior, custo_unitario, observacao, usuario_id)
+           VALUES (?, ?, 'S', 'CANCEL_NF', ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          u.empresaId,
+          it.produto_id,
+          id,
+          -Number(it.quantidade),
+          saldoAnt,
+          saldoPost,
+          it.valor_unitario,
+          `Estorno NF ${nota.numero}${nota.serie ? '/' + nota.serie : ''}`,
+          u.id,
+        )
+        .run();
+    }
+
+    await db().prepare('DELETE FROM notas_entrada WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).run();
+    return Astro.redirect('/notas-entrada?ok=cancelada');
+  }
+}
+---
+<Layout title={`NF ${nota.numero}`} active="notas">
+  <div class="row">
+    <h1>Nota Fiscal nº {nota.numero}{nota.serie ? ` / Série ${nota.serie}` : ''}</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/notas-entrada">← Voltar</a>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div class="c6">
+        <label>Fornecedor</label>
+        <div>
+          <a href={`/clientes/${nota.fornecedor_id}`}><strong>{nota.fornecedor_nome}</strong></a>
+          {nota.fornecedor_doc && <span class="muted"> ({formatDoc(nota.fornecedor_doc)})</span>}
+        </div>
+      </div>
+      <div class="c3"><label>Data de emissão</label><div>{nota.data_emissao}</div></div>
+      <div class="c3"><label>Data de entrada</label><div>{nota.data_entrada}</div></div>
+      {nota.chave_acesso && (
+        <div class="c8"><label>Chave de acesso</label><div style="font-family:monospace">{nota.chave_acesso}</div></div>
+      )}
+      <div class="c4"><label>Registrada por</label><div>{nota.usuario_nome ?? '—'} em {nota.criado_em}</div></div>
+      {nota.observacoes && <div class="c12"><label>Observações</label><div>{nota.observacoes}</div></div>}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Produtos recebidos (estoque alimentado)</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Produto</th>
+            <th>Qtd. entrada</th>
+            <th>Custo unit.</th>
+            <th>Subtotal</th>
+            <th>Preço venda definito</th>
+            <th>Estoque atual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {itens.map((it) => (
+            <tr>
+              <td class="muted">{it.codigo || '—'}</td>
+              <td><a href={`/produtos/${it.produto_id}`}>{it.produto_nome}</a></td>
+              <td><strong>+{formatQty(it.quantidade)}</strong> <span class="muted">{it.unidade}</span></td>
+              <td>{formatMoney(it.valor_unitario)}</td>
+              <td>{formatMoney(it.valor_total)}</td>
+              <td>{it.novo_preco_venda !== null ? formatMoney(it.novo_preco_venda) : <span class="muted">Mantido</span>}</td>
+              <td>{formatQty(it.estoque_atual)} <span class="muted">{it.unidade}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid" style="margin-top:14px">
+      <div class="c3"><label>Total produtos</label><div>{formatMoney(nota.valor_produtos)}</div></div>
+      <div class="c3"><label>Frete / Outros</label><div>{formatMoney(Number(nota.valor_frete) + Number(nota.valor_outros))}</div></div>
+      <div class="c3"><label>Desconto</label><div>{formatMoney(nota.valor_desconto)}</div></div>
+      <div class="c3"><label>Total da Nota Fiscal</label><div><strong style="font-size:17px">{formatMoney(nota.valor_total)}</strong></div></div>
+    </div>
+  </div>
+
+  <form method="post" class="row">
+    <span class="spacer"></span>
+    <button
+      class="dg"
+      name="_acao"
+      value="cancelar"
+      onclick="return confirm('Cancelar esta NF de entrada? As quantidades serão estornadas (subtraídas) do estoque dos produtos.')"
+    >
+      Cancelar NF e estornar estoque
+    </button>
+  </form>
+</Layout>

@@ -1,0 +1,20 @@
+{
+  "name": "backoffice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "deploy": "astro build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply backoffice --local --yes",
+    "db:migrate:remote": "wrangler d1 migrations apply backoffice --remote --yes",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^14.4.7",
+    "astro": "^7.4.11",
+    "wrangler": "^4.160.1"
+  }
+}

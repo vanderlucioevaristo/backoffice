@@ -1,0 +1,47 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db, verifyPassword, createSession, DUMMY_HASH, SESSION_COOKIE, signupAllowed } from '../lib/auth';
+
+if (Astro.locals.user) return Astro.redirect('/');
+
+let erro = '';
+let empresa = '';
+let login = '';
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  empresa = String(f.get('empresa') ?? '').trim().toLowerCase();
+  login = String(f.get('login') ?? '').trim().toLowerCase();
+  const senha = String(f.get('senha') ?? '');
+
+  const u = await db()
+    .prepare(
+      `SELECT u.id, u.empresa_id, u.senha_hash FROM usuarios u
+         JOIN empresas e ON e.id = u.empresa_id
+        WHERE e.codigo = ? AND u.login = ? AND u.ativo = 1 AND e.ativa = 1`,
+    )
+    .bind(empresa, login)
+    .first<{ id: number; empresa_id: number; senha_hash: string }>();
+  const ok = await verifyPassword(senha, u?.senha_hash ?? DUMMY_HASH);
+  if (u && ok) {
+    const s = await createSession(u.id, u.empresa_id);
+    await db().prepare("UPDATE usuarios SET ultimo_acesso = datetime('now') WHERE id = ? AND empresa_id = ?").bind(u.id, u.empresa_id).run();
+    await db().prepare('DELETE FROM sessoes WHERE expira_em < ?').bind(new Date().toISOString()).run();
+    Astro.cookies.set(SESSION_COOKIE, s.token, {
+      httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', path: '/', maxAge: s.maxAge,
+    });
+    return Astro.redirect('/');
+  }
+  erro = 'Empresa, usuário ou senha inválidos.';
+}
+---
+<Layout title="Entrar" bare>
+  <form method="post" class="card">
+    <h1>Entrar</h1>
+    {erro && <div class="msg err">{erro}</div>}
+    <p><label for="empresa">Empresa (código)</label><input id="empresa" name="empresa" value={empresa} required autocomplete="organization" autofocus /></p>
+    <p><label for="login">Usuário</label><input id="login" name="login" value={login} required autocomplete="username" /></p>
+    <p><label for="senha">Senha</label><input id="senha" name="senha" type="password" required autocomplete="current-password" /></p>
+    <button style="width:100%">Entrar</button>
+    {signupAllowed() && <p class="muted" style="text-align:center;margin-bottom:0">Nova empresa? <a href="/cadastro-empresa">Cadastre-se</a></p>}
+  </form>
+</Layout>

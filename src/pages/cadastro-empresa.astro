@@ -1,0 +1,62 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db, hashPassword, createSession, SESSION_COOKIE, signupAllowed } from '../lib/auth';
+import { str, onlyDigits, validCNPJ, validEmail } from '../lib/validate';
+
+if (!signupAllowed()) return Astro.redirect('/login');
+if (Astro.locals.user) return Astro.redirect('/');
+
+let erro = '';
+let v: Record<string, string> = {};
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  v = {
+    codigo: str(f, 'codigo', 30).toLowerCase(), razao: str(f, 'razao'), fantasia: str(f, 'fantasia'),
+    cnpj: str(f, 'cnpj', 20), nome: str(f, 'nome'), email: str(f, 'email'), login: str(f, 'login', 40).toLowerCase(),
+  };
+  const senha = String(f.get('senha') ?? '');
+  const cnpj = onlyDigits(v.cnpj);
+
+  if (!/^[a-z0-9][a-z0-9-]{2,29}$/.test(v.codigo)) erro = 'Código da empresa: 3 a 30 caracteres (letras minúsculas, números e hífen).';
+  else if (!v.razao || !v.nome || !v.login) erro = 'Preencha os campos obrigatórios.';
+  else if (cnpj && !validCNPJ(cnpj)) erro = 'CNPJ inválido.';
+  else if (v.email && !validEmail(v.email)) erro = 'E-mail inválido.';
+  else if (senha.length < 8) erro = 'A senha deve ter pelo menos 8 caracteres.';
+  else {
+    const exists = await db().prepare('SELECT 1 FROM empresas WHERE codigo = ?').bind(v.codigo).first();
+    if (exists) erro = 'Este código de empresa já está em uso.';
+    else {
+      const hash = await hashPassword(senha);
+      const emp = await db()
+        .prepare('INSERT INTO empresas (codigo, razao_social, nome_fantasia, cnpj) VALUES (?,?,?,?) RETURNING id')
+        .bind(v.codigo, v.razao, v.fantasia || null, cnpj || null)
+        .first<{ id: number }>();
+      const usr = await db()
+        .prepare("INSERT INTO usuarios (empresa_id, login, nome, email, perfil, senha_hash) VALUES (?,?,?,?, 'admin', ?) RETURNING id")
+        .bind(emp!.id, v.login, v.nome, v.email || null, hash)
+        .first<{ id: number }>();
+      const s = await createSession(usr!.id, emp!.id);
+      Astro.cookies.set(SESSION_COOKIE, s.token, { httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', path: '/', maxAge: s.maxAge });
+      return Astro.redirect('/');
+    }
+  }
+}
+---
+<Layout title="Cadastrar empresa" bare>
+  <form method="post" class="card" style="max-width:560px">
+    <h1>Cadastrar empresa</h1>
+    {erro && <div class="msg err">{erro}</div>}
+    <div class="grid">
+      <div class="c6"><label>Código da empresa * (usado no login)</label><input name="codigo" value={v.codigo ?? ''} required /></div>
+      <div class="c6"><label>CNPJ</label><input name="cnpj" value={v.cnpj ?? ''} inputmode="numeric" /></div>
+      <div class="c12"><label>Razão social *</label><input name="razao" value={v.razao ?? ''} required /></div>
+      <div class="c12"><label>Nome fantasia</label><input name="fantasia" value={v.fantasia ?? ''} /></div>
+      <div class="c12"><h2 style="margin:8px 0 0">Administrador</h2></div>
+      <div class="c12"><label>Nome completo *</label><input name="nome" value={v.nome ?? ''} required /></div>
+      <div class="c6"><label>Usuário *</label><input name="login" value={v.login ?? ''} required autocomplete="username" /></div>
+      <div class="c6"><label>E-mail</label><input name="email" type="email" value={v.email ?? ''} /></div>
+      <div class="c12"><label>Senha * (mín. 8 caracteres)</label><input name="senha" type="password" required minlength="8" autocomplete="new-password" /></div>
+    </div>
+    <p class="row"><button>Criar empresa</button><a href="/login">Voltar</a></p>
+  </form>
+</Layout>

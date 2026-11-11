@@ -1,0 +1,139 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { str, onlyDigits, validCPF, validCNPJ, validEmail, UFS } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const idParam = Astro.params.id!;
+const isNew = idParam === 'novo';
+const id = Number(idParam);
+if (!isNew && !Number.isInteger(id)) return Astro.redirect('/clientes');
+
+let erro = '';
+let p: Record<string, any> = { tipo_pessoa: 'F', eh_cliente: 1, eh_fornecedor: 0, ativo: 1 };
+
+if (!isNew) {
+  const row = await db().prepare('SELECT * FROM parceiros WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).first<any>();
+  if (!row) return Astro.redirect('/clientes');
+  p = row;
+}
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  if (f.get('_acao') === 'excluir' && !isNew) {
+    await db().prepare('DELETE FROM parceiros WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).run();
+    return Astro.redirect('/clientes?ok=excluido');
+  }
+  const tipo = f.get('tipo_pessoa') === 'J' ? 'J' : 'F';
+  p = {
+    ...p,
+    tipo_pessoa: tipo,
+    eh_cliente: f.get('eh_cliente') ? 1 : 0,
+    eh_fornecedor: f.get('eh_fornecedor') ? 1 : 0,
+    nome: str(f, 'nome'), nome_fantasia: str(f, 'nome_fantasia'),
+    documento: onlyDigits(str(f, 'documento', 30)), rg_ie: str(f, 'rg_ie', 30),
+    email: str(f, 'email'), telefone: str(f, 'telefone', 30), celular: str(f, 'celular', 30), contato: str(f, 'contato'),
+    cep: onlyDigits(str(f, 'cep', 12)), logradouro: str(f, 'logradouro'), numero: str(f, 'numero', 20),
+    complemento: str(f, 'complemento', 100), bairro: str(f, 'bairro', 100), cidade: str(f, 'cidade', 100),
+    uf: str(f, 'uf', 2).toUpperCase(), observacoes: str(f, 'observacoes', 2000),
+    ativo: f.get('ativo') ? 1 : 0,
+  };
+  if (!p.nome) erro = tipo === 'F' ? 'Informe o nome.' : 'Informe a razão social.';
+  else if (!p.eh_cliente && !p.eh_fornecedor) erro = 'Marque ao menos uma opção: Cliente ou Fornecedor.';
+  else if (p.documento && tipo === 'F' && !validCPF(p.documento)) erro = 'CPF inválido.';
+  else if (p.documento && tipo === 'J' && !validCNPJ(p.documento)) erro = 'CNPJ inválido.';
+  else if (p.email && !validEmail(p.email)) erro = 'E-mail inválido.';
+  else if (p.uf && !UFS.includes(p.uf)) erro = 'UF inválida.';
+  else if (p.documento) {
+    const dup = await db()
+      .prepare('SELECT nome FROM parceiros WHERE empresa_id = ? AND documento = ? AND id <> ?')
+      .bind(u.empresaId, p.documento, isNew ? 0 : id).first<{ nome: string }>();
+    if (dup) erro = `Já existe um cadastro com este documento: ${dup.nome}.`;
+  }
+
+  if (!erro) {
+    const cols = ['tipo_pessoa','eh_cliente','eh_fornecedor','nome','nome_fantasia','documento','rg_ie','email','telefone','celular','contato',
+      'cep','logradouro','numero','complemento','bairro','cidade','uf','observacoes','ativo'];
+    const vals = cols.map((c) => (typeof p[c] === 'string' && p[c] === '' ? null : p[c]));
+    if (isNew) {
+      await db().prepare(`INSERT INTO parceiros (empresa_id, ${cols.join(',')}) VALUES (?, ${cols.map(() => '?').join(',')})`)
+        .bind(u.empresaId, ...vals).run();
+    } else {
+      await db().prepare(`UPDATE parceiros SET ${cols.map((c) => `${c} = ?`).join(', ')}, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?`)
+        .bind(...vals, id, u.empresaId).run();
+    }
+    return Astro.redirect('/clientes?ok=salvo');
+  }
+}
+const v = (k: string) => p[k] ?? '';
+const pj = p.tipo_pessoa === 'J';
+---
+<Layout title={isNew ? 'Novo cadastro' : 'Editar cadastro'} active="clientes">
+  <h1>{isNew ? 'Novo cliente / fornecedor' : 'Editar cadastro'}</h1>
+  {erro && <div class="msg err">{erro}</div>}
+  <form method="post" id="form">
+    <div class="card">
+      <h2>Dados principais</h2>
+      <div class="grid">
+        <div class="c3"><label>Tipo de pessoa *</label>
+          <select name="tipo_pessoa" id="tipo">
+            <option value="F" selected={!pj}>Pessoa Física</option>
+            <option value="J" selected={pj}>Pessoa Jurídica</option>
+          </select></div>
+        <div class="c6"><label>Cadastrar como *</label>
+          <div class="row" style="height:36px">
+            <label class="check"><input type="checkbox" name="eh_cliente" checked={!!p.eh_cliente} /> Cliente</label>
+            <label class="check"><input type="checkbox" name="eh_fornecedor" checked={!!p.eh_fornecedor} /> Fornecedor</label>
+          </div></div>
+        <div class="c3"><label>&nbsp;</label><label class="check"><input type="checkbox" name="ativo" checked={!!p.ativo} /> Ativo</label></div>
+        <div class="c6"><label id="lbl-nome">{pj ? 'Razão social *' : 'Nome completo *'}</label><input name="nome" value={v('nome')} required /></div>
+        <div class="c6"><label id="lbl-fantasia">{pj ? 'Nome fantasia' : 'Apelido'}</label><input name="nome_fantasia" value={v('nome_fantasia')} /></div>
+        <div class="c4"><label id="lbl-doc">{pj ? 'CNPJ' : 'CPF'}</label><input name="documento" value={v('documento')} inputmode="numeric" /></div>
+        <div class="c4"><label id="lbl-rg">{pj ? 'Inscrição estadual' : 'RG'}</label><input name="rg_ie" value={v('rg_ie')} /></div>
+        <div class="c4"><label>Pessoa de contato</label><input name="contato" value={v('contato')} /></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Contato</h2>
+      <div class="grid">
+        <div class="c6"><label>E-mail</label><input name="email" type="email" value={v('email')} /></div>
+        <div class="c3"><label>Telefone</label><input name="telefone" value={v('telefone')} /></div>
+        <div class="c3"><label>Celular / WhatsApp</label><input name="celular" value={v('celular')} /></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Endereço</h2>
+      <div class="grid">
+        <div class="c3"><label>CEP</label><input name="cep" value={v('cep')} inputmode="numeric" /></div>
+        <div class="c6"><label>Logradouro</label><input name="logradouro" value={v('logradouro')} /></div>
+        <div class="c3"><label>Número</label><input name="numero" value={v('numero')} /></div>
+        <div class="c4"><label>Complemento</label><input name="complemento" value={v('complemento')} /></div>
+        <div class="c4"><label>Bairro</label><input name="bairro" value={v('bairro')} /></div>
+        <div class="c3"><label>Cidade</label><input name="cidade" value={v('cidade')} /></div>
+        <div class="c1" style="grid-column:span 1"><label>UF</label>
+          <select name="uf"><option value=""></option>{UFS.map((s) => <option selected={p.uf === s}>{s}</option>)}</select></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Observações</h2>
+      <textarea name="observacoes" rows="3">{v('observacoes')}</textarea>
+    </div>
+    <div class="row">
+      <button>Salvar</button>
+      <a class="btn sec" href="/clientes">Cancelar</a>
+      <span class="spacer"></span>
+      {!isNew && <button class="dg" name="_acao" value="excluir" formnovalidate onclick="return confirm('Excluir este cadastro definitivamente?')">Excluir</button>}
+    </div>
+  </form>
+</Layout>
+<script is:inline>
+  const t = document.getElementById('tipo');
+  const set = () => {
+    const j = t.value === 'J';
+    document.getElementById('lbl-nome').textContent = j ? 'Razão social *' : 'Nome completo *';
+    document.getElementById('lbl-fantasia').textContent = j ? 'Nome fantasia' : 'Apelido';
+    document.getElementById('lbl-doc').textContent = j ? 'CNPJ' : 'CPF';
+    document.getElementById('lbl-rg').textContent = j ? 'Inscrição estadual' : 'RG';
+  };
+  t.addEventListener('change', set);
+</script>

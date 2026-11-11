@@ -1,0 +1,91 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatDoc, onlyDigits } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const sp = Astro.url.searchParams;
+const q = (sp.get('q') ?? '').trim().slice(0, 100);
+const papel = sp.get('papel') ?? '';
+const pessoa = sp.get('pessoa') ?? '';
+const status = sp.get('status') ?? 'ativos';
+const page = Math.max(1, Number(sp.get('p')) || 1);
+const PER = 20;
+
+const where = ['empresa_id = ?'];
+const args: unknown[] = [u.empresaId];
+if (q) {
+  const d = onlyDigits(q);
+  where.push(`(nome LIKE ? OR nome_fantasia LIKE ? OR email LIKE ?${d ? ' OR documento LIKE ?' : ''})`);
+  args.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  if (d) args.push(`%${d}%`);
+}
+if (papel === 'cliente') where.push('eh_cliente = 1');
+if (papel === 'fornecedor') where.push('eh_fornecedor = 1');
+if (pessoa === 'F' || pessoa === 'J') { where.push('tipo_pessoa = ?'); args.push(pessoa); }
+if (status === 'ativos') where.push('ativo = 1');
+if (status === 'inativos') where.push('ativo = 0');
+const W = where.join(' AND ');
+
+const total = (await db().prepare(`SELECT COUNT(*) n FROM parceiros WHERE ${W}`).bind(...args).first<{ n: number }>())!.n;
+const { results } = await db()
+  .prepare(`SELECT id, tipo_pessoa, eh_cliente, eh_fornecedor, nome, documento, email, COALESCE(celular, telefone) fone, cidade, uf, ativo
+              FROM parceiros WHERE ${W} ORDER BY nome COLLATE NOCASE LIMIT ? OFFSET ?`)
+  .bind(...args, PER, (page - 1) * PER)
+  .all<any>();
+const pages = Math.max(1, Math.ceil(total / PER));
+const link = (p: number) => { const n = new URLSearchParams(sp); n.set('p', String(p)); return '?' + n; };
+const ok = sp.get('ok');
+---
+<Layout title="Clientes e Fornecedores" active="clientes">
+  <div class="row"><h1>Clientes e Fornecedores</h1><span class="spacer"></span><a class="btn" href="/clientes/novo">+ Novo</a></div>
+  {ok === 'salvo' && <div class="msg ok">Cadastro salvo.</div>}
+  {ok === 'excluido' && <div class="msg ok">Cadastro excluído.</div>}
+  <form class="card row" method="get">
+    <input name="q" value={q} placeholder="Buscar por nome, documento ou e-mail" style="flex:2;min-width:220px" />
+    <select name="papel" style="flex:1">
+      <option value="">Cliente e fornecedor</option>
+      <option value="cliente" selected={papel === 'cliente'}>Somente clientes</option>
+      <option value="fornecedor" selected={papel === 'fornecedor'}>Somente fornecedores</option>
+    </select>
+    <select name="pessoa" style="flex:1">
+      <option value="">Física e jurídica</option>
+      <option value="F" selected={pessoa === 'F'}>Pessoa física</option>
+      <option value="J" selected={pessoa === 'J'}>Pessoa jurídica</option>
+    </select>
+    <select name="status" style="flex:1">
+      <option value="ativos" selected={status === 'ativos'}>Ativos</option>
+      <option value="inativos" selected={status === 'inativos'}>Inativos</option>
+      <option value="todos" selected={status === 'todos'}>Todos</option>
+    </select>
+    <button>Filtrar</button>
+  </form>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>Telefone</th><th>Cidade</th><th>Situação</th></tr></thead>
+      <tbody>
+        {results.length === 0 && <tr><td colspan="6" class="muted">Nenhum cadastro encontrado.</td></tr>}
+        {results.map((r) => (
+          <tr>
+            <td><a href={`/clientes/${r.id}`}>{r.nome}</a><div class="muted" style="font-size:12px">{r.email}</div></td>
+            <td>
+              {r.eh_cliente ? <span class="tag">Cliente</span> : null}
+              {r.eh_fornecedor ? <span class="tag f">Fornecedor</span> : null}
+              <span class="muted">{r.tipo_pessoa === 'F' ? 'PF' : 'PJ'}</span>
+            </td>
+            <td>{formatDoc(r.documento)}</td>
+            <td>{r.fone}</td>
+            <td>{r.cidade}{r.uf ? `/${r.uf}` : ''}</td>
+            <td>{r.ativo ? 'Ativo' : <span class="tag off">Inativo</span>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <div class="pager row">
+    <span class="muted">{total} registro(s)</span><span class="spacer"></span>
+    {page > 1 && <a class="btn sec" href={link(page - 1)}>← Anterior</a>}
+    <span class="muted">Página {page} de {pages}</span>
+    {page < pages && <a class="btn sec" href={link(page + 1)}>Próxima →</a>}
+  </div>
+</Layout>

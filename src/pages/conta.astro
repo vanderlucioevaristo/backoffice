@@ -1,0 +1,28 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db, hashPassword, verifyPassword } from '../lib/auth';
+const me = Astro.locals.user!;
+let erro = '', ok = false;
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const atual = String(f.get('atual') ?? ''), nova = String(f.get('nova') ?? '');
+  const row = await db().prepare('SELECT senha_hash FROM usuarios WHERE id = ? AND empresa_id = ?').bind(me.id, me.empresaId).first<{ senha_hash: string }>();
+  if (!row || !(await verifyPassword(atual, row.senha_hash))) erro = 'Senha atual incorreta.';
+  else if (nova.length < 8) erro = 'A nova senha deve ter pelo menos 8 caracteres.';
+  else {
+    await db().prepare('UPDATE usuarios SET senha_hash = ? WHERE id = ? AND empresa_id = ?').bind(await hashPassword(nova), me.id, me.empresaId).run();
+    ok = true;
+  }
+}
+---
+<Layout title="Minha conta">
+  <h1>Minha conta</h1>
+  <form method="post" class="card" style="max-width:420px">
+    <h2>Alterar senha</h2>
+    {erro && <div class="msg err">{erro}</div>}
+    {ok && <div class="msg ok">Senha alterada.</div>}
+    <p><label>Senha atual</label><input name="atual" type="password" required autocomplete="current-password" /></p>
+    <p><label>Nova senha (mín. 8)</label><input name="nova" type="password" required minlength="8" autocomplete="new-password" /></p>
+    <button>Alterar</button>
+  </form>
+</Layout>

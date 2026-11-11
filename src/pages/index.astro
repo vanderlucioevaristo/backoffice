@@ -1,0 +1,20 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db } from '../lib/auth';
+const u = Astro.locals.user!;
+const c = await db()
+  .prepare(`SELECT COUNT(*) total, COALESCE(SUM(eh_cliente),0) clientes, COALESCE(SUM(eh_fornecedor),0) fornecedores
+              FROM parceiros WHERE empresa_id = ? AND ativo = 1`)
+  .bind(u.empresaId).first<{ total: number; clientes: number; fornecedores: number }>();
+const erro = Astro.url.searchParams.get('erro') === 'permissao';
+---
+<Layout title="Início" active="home">
+  <h1>Olá, {u.nome}</h1>
+  {erro && <div class="msg err">Você não tem permissão para acessar essa área.</div>}
+  <div class="grid">
+    <div class="card c4"><div class="muted">Cadastros ativos</div><h1 style="margin:0">{c?.total ?? 0}</h1></div>
+    <div class="card c4"><div class="muted">Clientes</div><h1 style="margin:0">{c?.clientes ?? 0}</h1></div>
+    <div class="card c4"><div class="muted">Fornecedores</div><h1 style="margin:0">{c?.fornecedores ?? 0}</h1></div>
+  </div>
+  <a class="btn" href="/clientes/novo">+ Novo cliente / fornecedor</a>
+</Layout>

@@ -1,0 +1,26 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+const u = Astro.locals.user!;
+const { results } = await db()
+  .prepare('SELECT id, login, nome, email, cargo, perfil, ativo, ultimo_acesso FROM usuarios WHERE empresa_id = ? ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId).all<any>();
+const ok = Astro.url.searchParams.get('ok');
+---
+<Layout title="Usuários" active="usuarios">
+  <div class="row"><h1>Usuários</h1><span class="spacer"></span><a class="btn" href="/usuarios/novo">+ Novo usuário</a></div>
+  {ok && <div class="msg ok">Usuário salvo.</div>}
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Nome</th><th>Usuário</th><th>E-mail</th><th>Cargo</th><th>Perfil</th><th>Situação</th><th>Último acesso</th></tr></thead>
+    <tbody>
+      {results.map((r) => (
+        <tr>
+          <td><a href={`/usuarios/${r.id}`}>{r.nome}</a></td><td>{r.login}</td><td>{r.email}</td><td>{r.cargo}</td>
+          <td>{r.perfil === 'admin' ? 'Administrador' : 'Usuário'}</td>
+          <td>{r.ativo ? 'Ativo' : <span class="tag off">Inativo</span>}</td>
+          <td class="muted">{r.ultimo_acesso ?? '—'}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table></div>
+</Layout>

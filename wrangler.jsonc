@@ -1,0 +1,12 @@
+{
+  "name": "backoffice",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "backoffice",
+      "database_id": "COLOQUE-AQUI-O-ID-DO-D1",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

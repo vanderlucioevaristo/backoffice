@@ -1,0 +1,81 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db, hashPassword } from '../../lib/auth';
+import { str, onlyDigits, validCPF, validEmail } from '../../lib/validate';
+
+const me = Astro.locals.user!;
+const idParam = Astro.params.id!;
+const isNew = idParam === 'novo';
+const id = Number(idParam);
+if (!isNew && !Number.isInteger(id)) return Astro.redirect('/usuarios');
+
+let erro = '';
+let p: Record<string, any> = { perfil: 'usuario', ativo: 1 };
+if (!isNew) {
+  const row = await db().prepare('SELECT * FROM usuarios WHERE id = ? AND empresa_id = ?').bind(id, me.empresaId).first<any>();
+  if (!row) return Astro.redirect('/usuarios');
+  p = row;
+}
+const self = !isNew && id === me.id;
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  p = {
+    ...p,
+    nome: str(f, 'nome'), login: isNew ? str(f, 'login', 40).toLowerCase() : p.login,
+    email: str(f, 'email'), cpf: onlyDigits(str(f, 'cpf', 20)), telefone: str(f, 'telefone', 30),
+    celular: str(f, 'celular', 30), cargo: str(f, 'cargo', 100),
+    perfil: self ? 'admin' : f.get('perfil') === 'admin' ? 'admin' : 'usuario',
+    ativo: self ? 1 : f.get('ativo') ? 1 : 0,
+  };
+  const senha = String(f.get('senha') ?? '');
+  if (!p.nome || !p.login) erro = 'Informe nome e usuário.';
+  else if (!/^[a-z0-9._-]{3,40}$/.test(p.login)) erro = 'Usuário: 3 a 40 caracteres (letras minúsculas, números, ponto, hífen, sublinhado).';
+  else if (p.email && !validEmail(p.email)) erro = 'E-mail inválido.';
+  else if (p.cpf && !validCPF(p.cpf)) erro = 'CPF inválido.';
+  else if ((isNew || senha) && senha.length < 8) erro = 'A senha deve ter pelo menos 8 caracteres.';
+  else if (isNew && (await db().prepare('SELECT 1 FROM usuarios WHERE empresa_id = ? AND login = ?').bind(me.empresaId, p.login).first()))
+    erro = 'Este nome de usuário já existe.';
+
+  if (!erro) {
+    const cols = ['nome', 'email', 'cpf', 'telefone', 'celular', 'cargo', 'perfil', 'ativo'];
+    const vals = cols.map((c) => (p[c] === '' ? null : p[c]));
+    if (isNew) {
+      await db().prepare(`INSERT INTO usuarios (empresa_id, login, senha_hash, ${cols.join(',')}) VALUES (?,?,?, ${cols.map(() => '?').join(',')})`)
+        .bind(me.empresaId, p.login, await hashPassword(senha), ...vals).run();
+    } else {
+      await db().prepare(`UPDATE usuarios SET ${cols.map((c) => `${c} = ?`).join(', ')}, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?`)
+        .bind(...vals, id, me.empresaId).run();
+      if (senha) {
+        await db().prepare('UPDATE usuarios SET senha_hash = ? WHERE id = ? AND empresa_id = ?').bind(await hashPassword(senha), id, me.empresaId).run();
+      }
+      if (!p.ativo || senha) await db().prepare('DELETE FROM sessoes WHERE usuario_id = ? AND empresa_id = ?').bind(id, me.empresaId).run();
+    }
+    return Astro.redirect('/usuarios?ok=1');
+  }
+}
+const v = (k: string) => p[k] ?? '';
+---
+<Layout title={isNew ? 'Novo usuário' : 'Editar usuário'} active="usuarios">
+  <h1>{isNew ? 'Novo usuário' : 'Editar usuário'}</h1>
+  {erro && <div class="msg err">{erro}</div>}
+  <form method="post" class="card">
+    <div class="grid">
+      <div class="c6"><label>Nome completo *</label><input name="nome" value={v('nome')} required /></div>
+      <div class="c3"><label>Usuário (login) *</label><input name="login" value={v('login')} required readonly={!isNew} autocomplete="off" /></div>
+      <div class="c3"><label>{isNew ? 'Senha *' : 'Nova senha (deixe vazio para manter)'}</label><input name="senha" type="password" minlength="8" required={isNew} autocomplete="new-password" /></div>
+      <div class="c6"><label>E-mail</label><input name="email" type="email" value={v('email')} /></div>
+      <div class="c3"><label>CPF</label><input name="cpf" value={v('cpf')} inputmode="numeric" /></div>
+      <div class="c3"><label>Cargo</label><input name="cargo" value={v('cargo')} /></div>
+      <div class="c3"><label>Telefone</label><input name="telefone" value={v('telefone')} /></div>
+      <div class="c3"><label>Celular</label><input name="celular" value={v('celular')} /></div>
+      <div class="c3"><label>Perfil</label>
+        <select name="perfil" disabled={self}>
+          <option value="usuario" selected={p.perfil === 'usuario'}>Usuário</option>
+          <option value="admin" selected={p.perfil === 'admin'}>Administrador</option>
+        </select></div>
+      <div class="c3"><label>&nbsp;</label><label class="check"><input type="checkbox" name="ativo" checked={!!p.ativo} disabled={self} /> Ativo</label></div>
+    </div>
+    <p class="row"><button>Salvar</button><a class="btn sec" href="/usuarios">Cancelar</a></p>
+  </form>
+</Layout>

@@ -1,0 +1,35 @@
+---
+import '../styles/global.css';
+interface Props { title: string; active?: string; bare?: boolean }
+const { title, active = '', bare = false } = Astro.props;
+const user = Astro.locals.user;
+---
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · Backoffice</title>
+  </head>
+  <body>
+    {bare ? (
+      <main class="auth"><slot /></main>
+    ) : (
+      <>
+        <header class="top">
+          <strong class="brand">Backoffice</strong>
+          <nav>
+            <a href="/" class={active === 'home' ? 'on' : ''}>Início</a>
+            <a href="/clientes" class={active === 'clientes' ? 'on' : ''}>Clientes / Fornecedores</a>
+            {user?.perfil === 'admin' && <a href="/usuarios" class={active === 'usuarios' ? 'on' : ''}>Usuários</a>}
+          </nav>
+          <div class="who">
+            <span>{user?.empresaNome} · <a href="/conta">{user?.nome}</a></span>
+            <form method="post" action="/logout"><button class="link">Sair</button></form>
+          </div>
+        </header>
+        <main class="page"><slot /></main>
+      </>
+    )}
+  </body>
+</html>

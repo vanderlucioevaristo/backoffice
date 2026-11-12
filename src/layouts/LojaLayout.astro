@@ -179,8 +179,24 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       .ml-cart-pill {
         display: inline-flex;
         align-items: center;
-        gap: 5px;
+        gap: 6px;
         font-weight: 700;
+        background: #ffffff;
+        color: #000000 !important;
+        opacity: 1 !important;
+        padding: 5px 11px;
+        border-radius: 999px;
+        box-shadow: 0 1px 3px rgba(0,0,0,.18);
+      }
+      .ml-cart-pill svg {
+        width: 16px;
+        height: 16px;
+        stroke: #000000;
+        fill: none;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex-shrink: 0;
       }
       .ml-badge {
         background: var(--pr);
@@ -889,7 +905,13 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
               <span class="ml-user-hello">Olá, <strong>{cliente.nome.split(' ')[0]}</strong></span>
               <a href={`${baseUrl}/meus-pedidos`}>Compras</a>
               <a href={`${baseUrl}/carrinho`} class="ml-cart-pill">
-                🛒 Carrinho <span class="ml-badge">{qtdCarrinho}</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="9" cy="21" r="1.5" fill="#000000" />
+                  <circle cx="20" cy="21" r="1.5" fill="#000000" />
+                  <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+                </svg>
+                <span>Carrinho</span>
+                <span class="ml-badge">{qtdCarrinho}</span>
               </a>
               <form method="post" action={`${baseUrl}/sair`} style="margin:0">
                 <button class="ml-logout-btn">Sair</button>

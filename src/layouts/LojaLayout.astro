@@ -846,7 +846,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
 
       <div class="bot-msgs" id="bot-msgs">
         <div class="bot-bubble bot">
-          Olá{cliente ? `, <strong>${cliente.nome.split(' ')[0]}</strong>` : ''}! 👋 Sou o assistente da <strong>{empresa.nome}</strong>.<br />
+          Olá{cliente ? <>, <strong>{cliente.nome}</strong></> : ''}! 👋 Sou o assistente da <strong>{empresa.nome}</strong>.<br />
           Posso consultar o <strong>status dos seus pedidos</strong>, verificar <strong>preços e estoque de produtos</strong> ou informar nossos <strong>canais de suporte</strong>. Como posso ajudar?
         </div>
       </div>

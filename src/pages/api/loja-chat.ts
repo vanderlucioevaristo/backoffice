@@ -188,7 +188,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     }
     if (meusPedidos.length === 0) {
       return json({
-        resposta: `Olá, **${cliente.nome.split(' ')[0]}**! Você ainda não possui pedidos finalizados nesta loja. Adicione produtos ao carrinho para fazer seu primeiro pedido!`,
+        resposta: `Olá, **${cliente.nome}**! Você ainda não possui pedidos finalizados nesta loja. Adicione produtos ao carrinho para fazer seu primeiro pedido!`,
       });
     }
     const resumo = meusPedidos.slice(0, 5).map((p) => {
@@ -198,7 +198,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     });
     return json({
       resposta: [
-        `📦 **Seus últimos pedidos (${cliente.nome.split(' ')[0]}):**`,
+        `📦 **Seus últimos pedidos (${cliente.nome}):**`,
         ...resumo,
         '',
         'Se quiser ver os itens de um pedido específico, digite por exemplo **"pedido #' +
@@ -292,7 +292,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   // 6. Saudação ou resposta padrão amigável com guia do que o bot sabe fazer
   return json({
     resposta: [
-      `Olá${cliente ? `, **${cliente.nome.split(' ')[0]}**` : ''}! 👋 Sou o assistente virtual da **${empresa.nome}**.`,
+      `Olá${cliente ? `, **${cliente.nome}**` : ''}! 👋 Sou o assistente virtual da **${empresa.nome}**.`,
       'Posso ajudar você agora mesmo com:',
       '• 📦 **Meus pedidos:** pergunte *"qual o status dos meus pedidos"* ou *"pedido #1"*',
       '• 🏷️ **Produtos e Estoque:** digite o nome de um produto para ver preço e quantidade disponível',

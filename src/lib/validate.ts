@@ -1,4 +1,5 @@
 export const onlyDigits = (s: string) => s.replace(/\D/g, '');
+export const cleanDoc = (s: string) => s.toUpperCase().replace(/[^0-9A-Z]/g, '');
 
 export function validCPF(v: string) {
   const d = onlyDigits(v);
@@ -12,9 +13,15 @@ export function validCPF(v: string) {
   return calc(9) === Number(d[9]) && calc(10) === Number(d[10]);
 }
 
-export function validCNPJ(v: string) {
-  const d = onlyDigits(v);
-  if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+export function validCNPJ(v: string, novoFormato = false) {
+  if (novoFormato) {
+    const c = cleanDoc(v);
+    if (c.length !== 14 || /^([0-9A-Z])\1+$/.test(c)) return false;
+    // Novo formato do CNPJ (IN RFB nº 2.229/2024): 12 posições alfanuméricas (raiz + ordem) e 2 dígitos verificadores numéricos
+    return /^[0-9A-Z]{12}\d{2}$/.test(c);
+  }
+  const d = cleanDoc(v);
+  if (d.length !== 14 || !/^\d{14}$/.test(d) || /^(\d)\1+$/.test(d)) return false;
   const calc = (len: number) => {
     const w = len === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     let sum = 0;
@@ -50,8 +57,9 @@ export function formatQty(n: number | null | undefined): string {
 
 export function formatDoc(d: string | null | undefined) {
   if (!d) return '';
-  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  const c = cleanDoc(d);
+  if (c.length === 11 && /^\d{11}$/.test(c)) return c.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  if (c.length === 14) return c.replace(/([0-9A-Z]{2})([0-9A-Z]{3})([0-9A-Z]{3})([0-9A-Z]{4})([0-9A-Z]{2})/, '$1.$2.$3/$4-$5');
   return d;
 }
 

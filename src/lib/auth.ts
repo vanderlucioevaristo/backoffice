@@ -254,6 +254,7 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN rodape_cor_fundo TEXT NOT NULL DEFAULT '#ffffff'",
       "ALTER TABLE empresas ADD COLUMN rodape_cor_texto TEXT NOT NULL DEFAULT '#333333'",
       "ALTER TABLE parceiros ADD COLUMN senha_hash TEXT",
+      "ALTER TABLE parceiros ADD COLUMN cnpj_novo_formato INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE produtos ADD COLUMN foto TEXT",
       "ALTER TABLE loja_pedidos ADD COLUMN status TEXT NOT NULL DEFAULT 'novo'",
       "ALTER TABLE loja_pedidos ADD COLUMN origem TEXT NOT NULL DEFAULT 'LOJA'",

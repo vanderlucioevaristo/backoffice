@@ -1,7 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
-import { formatDoc, onlyDigits } from '../../lib/validate';
+import { formatDoc, cleanDoc } from '../../lib/validate';
 
 const u = Astro.locals.user!;
 const sp = Astro.url.searchParams;
@@ -15,7 +15,7 @@ const PER = 20;
 const where = ['empresa_id = ?'];
 const args: unknown[] = [u.empresaId];
 if (q) {
-  const d = onlyDigits(q);
+  const d = cleanDoc(q);
   where.push(`(nome LIKE ? OR nome_fantasia LIKE ? OR email LIKE ?${d ? ' OR documento LIKE ?' : ''})`);
   args.push(`%${q}%`, `%${q}%`, `%${q}%`);
   if (d) args.push(`%${d}%`);

@@ -9,7 +9,7 @@ import {
   DUMMY_HASH,
   CLIENT_SESSION_COOKIE,
 } from '../../../lib/auth';
-import { onlyDigits } from '../../../lib/validate';
+import { cleanDoc } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
 const empresa = await getLojaEmpresa(empCodigo);
@@ -27,7 +27,7 @@ if (Astro.request.method === 'POST') {
   const f = await Astro.request.formData();
   ident = String(f.get('ident') ?? '').trim();
   const senha = String(f.get('senha') ?? '');
-  const digits = onlyDigits(ident);
+  const digits = cleanDoc(ident);
 
   const parceiro = await db()
     .prepare(

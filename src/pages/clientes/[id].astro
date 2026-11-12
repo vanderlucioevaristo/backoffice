@@ -1,7 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db, hashPassword } from '../../lib/auth';
-import { str, onlyDigits, validCPF, validCNPJ, validEmail, UFS } from '../../lib/validate';
+import { str, onlyDigits, cleanDoc, validCPF, validCNPJ, validEmail, UFS } from '../../lib/validate';
 
 const u = Astro.locals.user!;
 const idParam = Astro.params.id!;
@@ -10,12 +10,15 @@ const id = Number(idParam);
 if (!isNew && !Number.isInteger(id)) return Astro.redirect('/clientes');
 
 let erro = '';
-let p: Record<string, any> = { tipo_pessoa: 'F', eh_cliente: 1, eh_fornecedor: 0, ativo: 1 };
+let p: Record<string, any> = { tipo_pessoa: 'F', eh_cliente: 1, eh_fornecedor: 0, ativo: 1, cnpj_novo_formato: 0 };
 
 if (!isNew) {
   const row = await db().prepare('SELECT * FROM parceiros WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).first<any>();
   if (!row) return Astro.redirect('/clientes');
   p = row;
+  if (!p.cnpj_novo_formato && p.documento && /[A-Z]/i.test(p.documento)) {
+    p.cnpj_novo_formato = 1;
+  }
 }
 
 if (Astro.request.method === 'POST') {
@@ -25,13 +28,18 @@ if (Astro.request.method === 'POST') {
     return Astro.redirect('/clientes?ok=excluido');
   }
   const tipo = f.get('tipo_pessoa') === 'J' ? 'J' : 'F';
+  const cnpjNovoFormato = tipo === 'J' && f.get('cnpj_novo_formato') ? 1 : 0;
+  const rawDoc = str(f, 'documento', 30);
+  const docLimpo = tipo === 'J' && cnpjNovoFormato ? cleanDoc(rawDoc) : onlyDigits(rawDoc);
+
   p = {
     ...p,
     tipo_pessoa: tipo,
     eh_cliente: f.get('eh_cliente') ? 1 : 0,
     eh_fornecedor: f.get('eh_fornecedor') ? 1 : 0,
+    cnpj_novo_formato: cnpjNovoFormato,
     nome: str(f, 'nome'), nome_fantasia: str(f, 'nome_fantasia'),
-    documento: onlyDigits(str(f, 'documento', 30)), rg_ie: str(f, 'rg_ie', 30),
+    documento: docLimpo, rg_ie: str(f, 'rg_ie', 30),
     email: str(f, 'email'), telefone: str(f, 'telefone', 30), celular: str(f, 'celular', 30), contato: str(f, 'contato'),
     cep: onlyDigits(str(f, 'cep', 12)), logradouro: str(f, 'logradouro'), numero: str(f, 'numero', 20),
     complemento: str(f, 'complemento', 100), bairro: str(f, 'bairro', 100), cidade: str(f, 'cidade', 100),
@@ -41,7 +49,11 @@ if (Astro.request.method === 'POST') {
   if (!p.nome) erro = tipo === 'F' ? 'Informe o nome.' : 'Informe a razão social.';
   else if (!p.eh_cliente && !p.eh_fornecedor) erro = 'Marque ao menos uma opção: Cliente ou Fornecedor.';
   else if (p.documento && tipo === 'F' && !validCPF(p.documento)) erro = 'CPF inválido.';
-  else if (p.documento && tipo === 'J' && !validCNPJ(p.documento)) erro = 'CNPJ inválido.';
+  else if (p.documento && tipo === 'J' && !validCNPJ(p.documento, !!cnpjNovoFormato)) {
+    erro = cnpjNovoFormato
+      ? 'CNPJ inválido. No novo formato alfanumérico, informe 12 caracteres (letras/números) + 2 dígitos verificadores numéricos.'
+      : 'CNPJ inválido. Caso seja um CNPJ alfanumérico, marque a opção "Novo formato" ao lado do campo.';
+  }
   else if (p.email && !validEmail(p.email)) erro = 'E-mail inválido.';
   else if (p.uf && !UFS.includes(p.uf)) erro = 'UF inválida.';
   else if (f.get('senha_loja') && String(f.get('senha_loja')).length < 6) erro = 'A senha da loja do cliente deve ter pelo menos 6 caracteres.';
@@ -54,7 +66,7 @@ if (Astro.request.method === 'POST') {
 
   if (!erro) {
     const novaSenhaLoja = String(f.get('senha_loja') ?? '');
-    const cols = ['tipo_pessoa','eh_cliente','eh_fornecedor','nome','nome_fantasia','documento','rg_ie','email','telefone','celular','contato',
+    const cols = ['tipo_pessoa','eh_cliente','eh_fornecedor','cnpj_novo_formato','nome','nome_fantasia','documento','rg_ie','email','telefone','celular','contato',
       'cep','logradouro','numero','complemento','bairro','cidade','uf','observacoes','ativo'];
     const vals = cols.map((c) => (typeof p[c] === 'string' && p[c] === '' ? null : p[c]));
     let targetId = id;
@@ -93,8 +105,13 @@ const pj = p.tipo_pessoa === 'J';
       </p>
       <div id="auto-erro" class="msg err" style="display:none"></div>
       <p>
-        <label for="inp-auto-doc">CPF ou CNPJ *</label>
-        <input id="inp-auto-doc" placeholder="Digite somente números ou com pontuação" inputmode="numeric" autocomplete="off" />
+        <div class="row" style="justify-content:space-between;margin-bottom:4px">
+          <label for="inp-auto-doc" style="margin:0">CPF ou CNPJ *</label>
+          <label class="check" style="font-size:12px;margin:0">
+            <input type="checkbox" id="chk-auto-cnpj-novo" /> CNPJ novo formato (alfanumérico)
+          </label>
+        </div>
+        <input id="inp-auto-doc" placeholder="Digite somente números ou com pontuação" inputmode="numeric" autocomplete="off" style="text-transform:uppercase" />
       </p>
       <div class="row" style="justify-content:flex-end;margin-top:16px">
         <button type="button" class="btn sec" id="btn-auto-fechar">Cancelar</button>
@@ -120,7 +137,29 @@ const pj = p.tipo_pessoa === 'J';
         <div class="c3"><label>&nbsp;</label><label class="check"><input type="checkbox" name="ativo" checked={!!p.ativo} /> Ativo</label></div>
         <div class="c6"><label id="lbl-nome">{pj ? 'Razão social *' : 'Nome completo *'}</label><input name="nome" value={v('nome')} required /></div>
         <div class="c6"><label id="lbl-fantasia">{pj ? 'Nome fantasia' : 'Apelido'}</label><input name="nome_fantasia" value={v('nome_fantasia')} /></div>
-        <div class="c4"><label id="lbl-doc">{pj ? 'CNPJ' : 'CPF'}</label><input name="documento" value={v('documento')} inputmode="numeric" /></div>
+        <div class="c4">
+          <div class="row" style="justify-content:space-between;margin-bottom:4px;gap:6px">
+            <label id="lbl-doc" style="margin:0">{pj ? 'CNPJ' : 'CPF'}</label>
+            <label
+              id="wrap-cnpj-novo"
+              class="check"
+              style={`font-size:12px;margin:0;color:var(--pr);font-weight:600;${pj ? 'display:inline-flex' : 'display:none'}`}
+              title="Habilita o novo padrão de CNPJ alfanumérico (letras e números — IN RFB nº 2.229/2024)"
+            >
+              <input type="checkbox" name="cnpj_novo_formato" id="chk-cnpj-novo" value="1" checked={!!p.cnpj_novo_formato} />
+              Novo formato (alfanumérico)
+            </label>
+          </div>
+          <input
+            name="documento"
+            id="inp-documento"
+            value={v('documento')}
+            inputmode={pj && p.cnpj_novo_formato ? 'text' : 'numeric'}
+            maxlength="18"
+            placeholder={pj ? (p.cnpj_novo_formato ? 'AA.AAA.AAA/AAAA-00' : '00.000.000/0000-00') : '000.000.000-00'}
+            style="text-transform:uppercase"
+          />
+        </div>
         <div class="c4"><label id="lbl-rg">{pj ? 'Inscrição estadual' : 'RG'}</label><input name="rg_ie" value={v('rg_ie')} /></div>
         <div class="c4"><label>Pessoa de contato</label><input name="contato" value={v('contato')} /></div>
       </div>
@@ -167,14 +206,36 @@ const pj = p.tipo_pessoa === 'J';
 </Layout>
 <script is:inline>
   const t = document.getElementById('tipo');
+  const wrapCnpjNovo = document.getElementById('wrap-cnpj-novo');
+  const chkCnpjNovo = document.getElementById('chk-cnpj-novo');
+  const inpDocumento = document.getElementById('inp-documento');
+
   const set = () => {
     const j = t.value === 'J';
+    const novoFmt = j && chkCnpjNovo && chkCnpjNovo.checked;
     document.getElementById('lbl-nome').textContent = j ? 'Razão social *' : 'Nome completo *';
     document.getElementById('lbl-fantasia').textContent = j ? 'Nome fantasia' : 'Apelido';
     document.getElementById('lbl-doc').textContent = j ? 'CNPJ' : 'CPF';
     document.getElementById('lbl-rg').textContent = j ? 'Inscrição estadual' : 'RG';
+    if (wrapCnpjNovo) wrapCnpjNovo.style.display = j ? 'inline-flex' : 'none';
+    if (inpDocumento) {
+      inpDocumento.inputMode = novoFmt ? 'text' : 'numeric';
+      inpDocumento.placeholder = j
+        ? (novoFmt ? 'AA.AAA.AAA/AAAA-00' : '00.000.000/0000-00')
+        : '000.000.000-00';
+    }
   };
   t.addEventListener('change', set);
+  chkCnpjNovo?.addEventListener('change', set);
+  inpDocumento?.addEventListener('input', () => {
+    const j = t.value === 'J';
+    // Se o usuário digitar letras em PJ, marca automaticamente a flag de novo formato
+    if (j && /[a-zA-Z]/.test(inpDocumento.value) && chkCnpjNovo && !chkCnpjNovo.checked) {
+      chkCnpjNovo.checked = true;
+      set();
+    }
+    inpDocumento.value = inpDocumento.value.toUpperCase();
+  });
 
   // Cadastro automático via diálogo de CPF/CNPJ
   const dlg = document.getElementById('dlg-auto');
@@ -206,12 +267,22 @@ const pj = p.tipo_pessoa === 'J';
     abrirDialogo();
   }
 
+  const chkAutoCnpjNovo = document.getElementById('chk-auto-cnpj-novo');
+  chkAutoCnpjNovo?.addEventListener('change', () => {
+    inpDoc.inputMode = chkAutoCnpjNovo.checked ? 'text' : 'numeric';
+    inpDoc.placeholder = chkAutoCnpjNovo.checked
+      ? 'Ex: 12.ABC.345/01DE-35 (letras e números)'
+      : 'Digite somente números ou com pontuação';
+  });
+
   formAuto.addEventListener('submit', async (e) => {
     e.preventDefault();
     boxErro.style.display = 'none';
-    const doc = (inpDoc.value || '').replace(/\D/g, '');
+    const raw = (inpDoc.value || '').toUpperCase();
+    const isAlnum = (chkAutoCnpjNovo && chkAutoCnpjNovo.checked) || /[A-Z]/.test(raw);
+    const doc = isAlnum ? raw.replace(/[^0-9A-Z]/g, '') : raw.replace(/\D/g, '');
     if (doc.length !== 11 && doc.length !== 14) {
-      boxErro.textContent = 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos).';
+      boxErro.textContent = 'Informe um CPF (11 dígitos) ou CNPJ (14 caracteres).';
       boxErro.style.display = 'block';
       return;
     }
@@ -221,7 +292,7 @@ const pj = p.tipo_pessoa === 'J';
     btnBuscar.textContent = 'Buscando...';
 
     try {
-      const res = await fetch('/api/consulta-doc?doc=' + encodeURIComponent(doc));
+      const res = await fetch('/api/consulta-doc?doc=' + encodeURIComponent(doc) + (isAlnum ? '&novo=1' : ''));
       const data = await res.json();
       if (!res.ok || data.erro) {
         boxErro.textContent = data.erro || 'Não foi possível consultar o documento.';
@@ -232,8 +303,11 @@ const pj = p.tipo_pessoa === 'J';
       const d = data.dados || {};
       if (d.tipo_pessoa) {
         t.value = d.tipo_pessoa;
-        set();
       }
+      if (chkCnpjNovo) {
+        chkCnpjNovo.checked = !!isAlnum || /[A-Z]/.test(String(d.documento || ''));
+      }
+      set();
       const campos = [
         'documento', 'nome', 'nome_fantasia', 'rg_ie', 'contato',
         'email', 'telefone', 'celular',

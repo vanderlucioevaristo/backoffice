@@ -16,6 +16,20 @@ npm run dev
 
 Acesse `http://localhost:4321/cadastro-empresa` para criar a primeira empresa e o usuário administrador.
 
+## Zerar / Recriar o banco de dados local
+
+Se precisar apagar todos os dados locais e recriar as tabelas do zero:
+
+```bash
+rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local
+```
+
+Se precisar apenas aplicar novas migrações sem apagar os dados existentes:
+
+```bash
+npm run db:migrate:local
+```
+
 ## Subir na Cloudflare com Git
 
 1. Crie o banco D1 na Cloudflare:

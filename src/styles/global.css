@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 body { margin:0; font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--tx); }
 a { color:var(--pr); text-decoration:none; } a:hover { text-decoration:underline; }
-.top { display:flex; gap:24px; align-items:center; padding:10px 24px; background:#111827; color:#fff; flex-wrap:wrap; }
+.top { position:sticky; top:0; z-index:90; box-shadow:0 2px 6px rgba(0,0,0,.15); display:flex; gap:24px; align-items:center; padding:10px 24px; background:#111827; color:#fff; flex-wrap:wrap; }
 .top a { color:#cbd5e1; } .top a.on, .top a:hover { color:#fff; }
 .top nav { display:flex; gap:18px; flex:1; } .brand { font-size:17px; }
 .who { display:flex; gap:12px; align-items:center; font-size:14px; } .who form { margin:0; }

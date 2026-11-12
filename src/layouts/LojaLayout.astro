@@ -79,9 +79,12 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
 
       /* Cabeçalho estilo Mercado Livre */
       .ml-header {
+        position: sticky;
+        top: 0;
+        z-index: 90;
         background: var(--topBg);
         color: var(--topTx);
-        box-shadow: 0 1px 2px rgba(0,0,0,.1);
+        box-shadow: 0 2px 6px rgba(0,0,0,.12);
       }
       .ml-header-inner {
         max-width: 1180px;
@@ -216,8 +219,8 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       }
       .ml-card {
         background: #fff;
-        border-radius: 6px;
-        box-shadow: 0 1px 2px 0 rgba(0,0,0,.12);
+        border-radius: 16px;
+        box-shadow: 0 2px 6px 0 rgba(0,0,0,.12);
         display: flex;
         flex-direction: column;
         cursor: pointer;
@@ -243,11 +246,12 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         width: auto;
         height: auto;
         object-fit: contain;
+        border-radius: 10px;
       }
       .ml-card-thumb .ml-no-img {
         width: 48px;
         height: 48px;
-        border-radius: 8px;
+        border-radius: 12px;
         background: #f5f5f5;
         display: grid;
         place-items: center;

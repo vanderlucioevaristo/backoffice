@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
-import { onlyDigits, validCPF, validCNPJ } from '../../lib/validate';
+import { onlyDigits, cleanDoc, validCPF, validCNPJ } from '../../lib/validate';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -26,13 +26,14 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
 }
 
 export const GET: APIRoute = async ({ url }) => {
+  const raw = url.searchParams.get('doc') ?? '';
+  const isNovo = url.searchParams.get('novo') === '1' || /[A-Za-z]/.test(raw);
+  const doc = isNovo ? cleanDoc(raw) : onlyDigits(raw);
 
-  const doc = onlyDigits(url.searchParams.get('doc') ?? '');
-
-  // ==================== CNPJ (14 dígitos) ====================
+  // ==================== CNPJ (14 caracteres: numérico ou alfanumérico) ====================
   if (doc.length === 14) {
-    if (!validCNPJ(doc)) {
-      return json({ erro: 'CNPJ inválido. Verifique os dígitos informados.' }, 400);
+    if (!validCNPJ(doc, isNovo)) {
+      return json({ erro: 'CNPJ inválido. Verifique os caracteres informados.' }, 400);
     }
 
     // 1ª opção: BrasilAPI (Receita Federal / Minha Receita)
@@ -126,6 +127,18 @@ export const GET: APIRoute = async ({ url }) => {
           uf: (rws.uf ?? '').toUpperCase(),
           ativo: true,
           observacoes: '',
+        },
+      });
+    }
+
+    if (isNovo && /[A-Z]/.test(doc)) {
+      return json({
+        ok: true,
+        aviso:
+          'CNPJ no novo formato alfanumérico validado! Preencha os demais dados da empresa e clique em Salvar.',
+        dados: {
+          tipo_pessoa: 'J',
+          documento: doc,
         },
       });
     }

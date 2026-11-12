@@ -349,6 +349,158 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         font-size: 12px;
         opacity: 0.78;
       }
+
+      /* Bot de Atendimento da Loja */
+      .bot-fab {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 95;
+        background: var(--pr);
+        color: #fff;
+        border: none;
+        border-radius: 999px;
+        padding: 12px 18px;
+        font-size: 14px;
+        font-weight: 700;
+        box-shadow: 0 6px 20px rgba(0,0,0,.22);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: transform .15s ease, box-shadow .15s ease;
+      }
+      .bot-fab:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0,0,0,.28);
+      }
+      .bot-win {
+        position: fixed;
+        right: 20px;
+        bottom: 76px;
+        width: 360px;
+        max-width: calc(100vw - 32px);
+        height: 490px;
+        max-height: calc(100vh - 110px);
+        background: #fff;
+        color: #1e293b;
+        border-radius: 14px;
+        box-shadow: 0 12px 36px rgba(0,0,0,.24);
+        border: 1px solid #e2e8f0;
+        z-index: 96;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .bot-win.open {
+        display: flex;
+      }
+      .bot-head {
+        background: var(--pr);
+        color: #fff;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .bot-head-title {
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .bot-head-sub {
+        font-size: 11px;
+        opacity: 0.9;
+      }
+      .bot-close {
+        background: rgba(255,255,255,.18);
+        color: #fff;
+        border: none;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        padding: 0;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .bot-msgs {
+        flex: 1;
+        padding: 12px;
+        overflow-y: auto;
+        background: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .bot-bubble {
+        max-width: 86%;
+        padding: 9px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.45;
+        word-wrap: break-word;
+      }
+      .bot-bubble.bot {
+        align-self: flex-start;
+        background: #ffffff;
+        color: #1e293b;
+        border: 1px solid #e2e8f0;
+        border-bottom-left-radius: 3px;
+      }
+      .bot-bubble.user {
+        align-self: flex-end;
+        background: var(--pr);
+        color: #ffffff;
+        border-bottom-right-radius: 3px;
+      }
+      .bot-chips {
+        display: flex;
+        gap: 6px;
+        padding: 8px 10px;
+        background: #f1f5f9;
+        border-top: 1px solid #e2e8f0;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .bot-chip {
+        background: #fff;
+        color: #334155;
+        border: 1px solid #cbd5e1;
+        border-radius: 99px;
+        padding: 4px 10px;
+        font-size: 11.5px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .bot-chip:hover {
+        border-color: var(--pr);
+        color: var(--pr);
+      }
+      .bot-form {
+        display: flex;
+        gap: 6px;
+        padding: 10px;
+        background: #fff;
+        border-top: 1px solid #e2e8f0;
+      }
+      .bot-form input {
+        flex: 1;
+        font-size: 13px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+      }
+      .bot-form button {
+        background: var(--pr);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 13px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -515,5 +667,126 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         )}
       </div>
     </footer>
+
+    <!-- Assistente Virtual da Loja (Pedidos, Produtos e Suporte) -->
+    <button type="button" class="bot-fab" id="bot-fab" aria-label="Abrir assistente virtual">
+      <span>💬</span>
+      <span>Dúvidas? Assistente</span>
+    </button>
+
+    <div class="bot-win" id="bot-win" data-empresa={empresa.codigo}>
+      <div class="bot-head">
+        <div>
+          <div class="bot-head-title">🤖 Assistente · {empresa.nome}</div>
+          <div class="bot-head-sub">Tire dúvidas sobre seus pedidos e produtos</div>
+        </div>
+        <button type="button" class="bot-close" id="bot-close" title="Fechar">✕</button>
+      </div>
+
+      <div class="bot-msgs" id="bot-msgs">
+        <div class="bot-bubble bot">
+          Olá{cliente ? `, <strong>${cliente.nome.split(' ')[0]}</strong>` : ''}! 👋 Sou o assistente da <strong>{empresa.nome}</strong>.<br />
+          Posso consultar o <strong>status dos seus pedidos</strong>, verificar <strong>preços e estoque de produtos</strong> ou informar nossos <strong>canais de suporte</strong>. Como posso ajudar?
+        </div>
+      </div>
+
+      <div class="bot-chips">
+        <button type="button" class="bot-chip" data-ask="Qual o status dos meus pedidos?">📦 Meus pedidos</button>
+        <button type="button" class="bot-chip" data-ask="Quais produtos estão disponíveis em estoque?">🛍️ Produtos e estoque</button>
+        <button type="button" class="bot-chip" data-ask="Qual o telefone, WhatsApp e horário de suporte?">📞 Suporte e contato</button>
+        <button type="button" class="bot-chip" data-ask="Qual o endereço da loja?">📍 Endereço</button>
+      </div>
+
+      <form class="bot-form" id="bot-form">
+        <input
+          type="text"
+          id="bot-input"
+          placeholder="Pergunte sobre um pedido ou produto..."
+          autocomplete="off"
+        />
+        <button type="submit" id="bot-send">Enviar</button>
+      </form>
+    </div>
+
+    <script is:inline>
+      (function () {
+        const fab = document.getElementById('bot-fab');
+        const win = document.getElementById('bot-win');
+        const closeBtn = document.getElementById('bot-close');
+        const msgs = document.getElementById('bot-msgs');
+        const form = document.getElementById('bot-form');
+        const input = document.getElementById('bot-input');
+        const empresaCodigo = win ? win.getAttribute('data-empresa') : '';
+
+        if (!fab || !win || !msgs || !form || !input) return;
+
+        function formatBotHtml(text) {
+          return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/_(.+?)_/g, '<em>$1</em>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/\n/g, '<br>');
+        }
+
+        function addBubble(text, who) {
+          const div = document.createElement('div');
+          div.className = 'bot-bubble ' + who;
+          if (who === 'bot') {
+            div.innerHTML = formatBotHtml(text);
+          } else {
+            div.textContent = text;
+          }
+          msgs.appendChild(div);
+          msgs.scrollTop = msgs.scrollHeight;
+          return div;
+        }
+
+        async function askBot(question) {
+          const q = String(question || '').trim();
+          if (!q) return;
+          if (!win.classList.contains('open')) win.classList.add('open');
+
+          addBubble(q, 'user');
+          input.value = '';
+          const loading = addBubble('Consultando...', 'bot');
+
+          try {
+            const resp = await fetch('/api/loja-chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ empresa: empresaCodigo, mensagem: q }),
+            });
+            const data = await resp.json();
+            loading.innerHTML = formatBotHtml(
+              data.resposta || data.erro || 'Não foi possível obter resposta no momento.',
+            );
+          } catch {
+            loading.textContent = 'Erro de conexão ao consultar o assistente.';
+          }
+          msgs.scrollTop = msgs.scrollHeight;
+        }
+
+        fab.addEventListener('click', () => {
+          win.classList.toggle('open');
+          if (win.classList.contains('open')) input.focus();
+        });
+
+        closeBtn && closeBtn.addEventListener('click', () => win.classList.remove('open'));
+
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          askBot(input.value);
+        });
+
+        document.querySelectorAll('.bot-chip').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            askBot(btn.getAttribute('data-ask'));
+          });
+        });
+      })();
+    </script>
   </body>
 </html>

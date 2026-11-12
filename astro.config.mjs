@@ -6,4 +6,5 @@ export default defineConfig({
   adapter: cloudflare({ imageService: 'passthrough' }),
   session: { driver: sessionDrivers.memory() },
   security: { checkOrigin: true }, // proteção CSRF para POST de formulários
+  devToolbar: { enabled: false },
 });

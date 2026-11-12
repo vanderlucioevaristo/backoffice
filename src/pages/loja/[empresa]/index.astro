@@ -1,7 +1,7 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE } from '../../../lib/auth';
-import { formatMoney, formatQty, parseNum } from '../../../lib/validate';
+import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, parseNum } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
 const empresa = await getLojaEmpresa(empCodigo);
@@ -82,22 +82,31 @@ if (q) {
   args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
 }
 
-// Ofertas ativas para o carrossel da loja (somente produtos com estoque >= 1)
+const agora = nowLocalIso();
+
+// Ofertas ativas e dentro do período de vigência para o carrossel da loja (somente produtos com estoque >= 1)
 const { results: ofertas } = await db()
   .prepare(
-    `SELECT o.id AS oferta_id, o.titulo_oferta, o.preco_oferta,
+    `SELECT o.id AS oferta_id, o.titulo_oferta, o.preco_oferta, o.inicio_em, o.fim_em,
             p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.unidade,
             p.preco_venda, p.estoque_atual, p.foto
        FROM loja_ofertas o
        JOIN produtos p ON p.id = o.produto_id AND p.empresa_id = o.empresa_id
-      WHERE o.empresa_id = ? AND o.ativa = 1 AND p.ativo = 1 AND p.estoque_atual >= 1
+      WHERE o.empresa_id = ?
+        AND o.ativa = 1
+        AND (o.inicio_em IS NULL OR o.inicio_em = '' OR o.inicio_em <= ?)
+        AND (o.fim_em IS NULL OR o.fim_em = '' OR o.fim_em >= ?)
+        AND p.ativo = 1
+        AND p.estoque_atual >= 1
       ORDER BY o.ordem ASC, o.id DESC`,
   )
-  .bind(empresa.id)
+  .bind(empresa.id, agora, agora)
   .all<{
     oferta_id: number;
     titulo_oferta: string | null;
     preco_oferta: number;
+    inicio_em: string | null;
+    fim_em: string | null;
     id: number;
     codigo: string | null;
     nome: string;
@@ -116,11 +125,16 @@ const { results: produtos } = await db()
             p.preco_venda, p.estoque_atual, p.foto,
             o.preco_oferta, o.titulo_oferta
        FROM produtos p
-       LEFT JOIN loja_ofertas o ON o.produto_id = p.id AND o.empresa_id = p.empresa_id AND o.ativa = 1
+       LEFT JOIN loja_ofertas o
+         ON o.produto_id = p.id
+        AND o.empresa_id = p.empresa_id
+        AND o.ativa = 1
+        AND (o.inicio_em IS NULL OR o.inicio_em = '' OR o.inicio_em <= ?)
+        AND (o.fim_em IS NULL OR o.fim_em = '' OR o.fim_em >= ?)
       WHERE ${where.join(' AND ')}
       ORDER BY p.nome COLLATE NOCASE`,
   )
-  .bind(...args)
+  .bind(agora, agora, ...args)
   .all<{
     id: number;
     codigo: string | null;
@@ -230,6 +244,11 @@ const baseUrl = `/loja/${empCodigo}`;
               </div>
 
               <div class="ml-title" style="font-weight:500">{of.nome}</div>
+              {of.fim_em && (
+                <div class="muted" style="font-size:10px;line-height:1.2">
+                  ⏱️ Até {formatDateTimeBr(of.fim_em)}
+                </div>
+              )}
 
               <div class="oferta-cta">
                 <span>Comprar oferta</span>

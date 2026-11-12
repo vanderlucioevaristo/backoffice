@@ -235,6 +235,8 @@ export async function ensureSchema(): Promise<void> {
         preco_oferta REAL NOT NULL DEFAULT 0 CHECK (preco_oferta >= 0),
         ordem INTEGER NOT NULL DEFAULT 0,
         ativa INTEGER NOT NULL DEFAULT 1,
+        inicio_em TEXT,
+        fim_em TEXT,
         criado_em TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (empresa_id, produto_id)
       )`,
@@ -271,6 +273,8 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE loja_pedidos ADD COLUMN origem TEXT NOT NULL DEFAULT 'LOJA'",
       "ALTER TABLE loja_pedidos ADD COLUMN valor_desconto REAL NOT NULL DEFAULT 0",
       "ALTER TABLE loja_pedidos ADD COLUMN atualizado_em TEXT",
+      "ALTER TABLE loja_ofertas ADD COLUMN inicio_em TEXT",
+      "ALTER TABLE loja_ofertas ADD COLUMN fim_em TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});

@@ -21,13 +21,31 @@ Acesse `http://localhost:4321/cadastro-empresa` para criar a primeira empresa e 
 Se precisar apagar todos os dados locais e recriar as tabelas do zero:
 
 ```bash
-rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local
+npm run db:reset:local
 ```
+*(ou diretamente: `rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local`)*
 
 Se precisar apenas aplicar novas migrações sem apagar os dados existentes:
 
 ```bash
 npm run db:migrate:local
+```
+
+## Zerar / Recriar o banco de dados remoto (Cloudflare D1)
+
+Para apagar todas as tabelas do banco D1 na nuvem da Cloudflare e recriar todas as migrações do zero:
+
+```bash
+npm run db:reset:remote
+```
+
+Se preferir recriar o próprio banco D1 do zero na Cloudflare (gerando um novo `database_id`):
+
+```bash
+npx wrangler d1 delete backoffice
+npx wrangler d1 create backoffice
+# Atualize o novo database_id no wrangler.jsonc e rode:
+npm run db:migrate:remote
 ```
 
 ## Subir na Cloudflare com Git

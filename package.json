@@ -10,6 +10,8 @@
     "deploy": "astro build && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply backoffice --local --yes",
     "db:migrate:remote": "wrangler d1 migrations apply backoffice --remote --yes",
+    "db:reset:local": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply backoffice --local --yes",
+    "db:reset:remote": "wrangler d1 execute backoffice --remote --yes --command \"PRAGMA foreign_keys = OFF; DROP TABLE IF EXISTS loja_ofertas; DROP TABLE IF EXISTS email_notificacoes; DROP TABLE IF EXISTS loja_pedidos_itens; DROP TABLE IF EXISTS loja_pedidos; DROP TABLE IF EXISTS loja_carrinho; DROP TABLE IF EXISTS sessoes_clientes; DROP TABLE IF EXISTS estoque_movimentacoes; DROP TABLE IF EXISTS notas_entrada_itens; DROP TABLE IF EXISTS notas_entrada; DROP TABLE IF EXISTS produtos_fornecedores; DROP TABLE IF EXISTS produtos; DROP TABLE IF EXISTS parceiros; DROP TABLE IF EXISTS sessoes; DROP TABLE IF EXISTS usuarios; DROP TABLE IF EXISTS empresas; DROP TABLE IF EXISTS d1_migrations; PRAGMA foreign_keys = ON;\" && wrangler d1 migrations apply backoffice --remote --yes",
     "check": "astro check"
   },
   "dependencies": {

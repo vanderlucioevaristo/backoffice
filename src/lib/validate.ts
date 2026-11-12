@@ -65,3 +65,26 @@ export function formatDoc(d: string | null | undefined) {
 
 /** Lê um campo de texto do FormData, com trim; vazio vira ''. */
 export const str = (f: FormData, k: string, max = 200) => String(f.get(k) ?? '').trim().slice(0, max);
+
+/** Retorna a data/hora atual no fuso de Brasília no formato YYYY-MM-DDTHH:mm (compatível com input datetime-local). */
+export function nowLocalIso(): string {
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+
+/** Formata YYYY-MM-DDTHH:mm para DD/MM/AAAA HH:mm */
+export function formatDateTimeBr(dt: string | null | undefined): string {
+  if (!dt) return '';
+  const m = String(dt).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return String(dt);
+  return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+}

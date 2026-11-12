@@ -1,7 +1,7 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE } from '../../../lib/auth';
-import { formatMoney, formatQty, parseNum, str } from '../../../lib/validate';
+import { formatMoney, formatQty, nowLocalIso, parseNum, str } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
 const empresa = await getLojaEmpresa(empCodigo);
@@ -15,6 +15,7 @@ if (!cliente) {
 
 let erro = '';
 let pedidoConcluidoId = 0;
+const agora = nowLocalIso();
 
 if (Astro.request.method === 'POST') {
   const f = await Astro.request.formData();
@@ -56,10 +57,15 @@ if (Astro.request.method === 'POST') {
                 p.preco_custo, p.estoque_atual
            FROM loja_carrinho c
            JOIN produtos p ON p.id = c.produto_id AND p.empresa_id = c.empresa_id
-           LEFT JOIN loja_ofertas o ON o.produto_id = p.id AND o.empresa_id = p.empresa_id AND o.ativa = 1
+           LEFT JOIN loja_ofertas o
+             ON o.produto_id = p.id
+            AND o.empresa_id = p.empresa_id
+            AND o.ativa = 1
+            AND (o.inicio_em IS NULL OR o.inicio_em = '' OR o.inicio_em <= ?)
+            AND (o.fim_em IS NULL OR o.fim_em = '' OR o.fim_em >= ?)
           WHERE c.empresa_id = ? AND c.parceiro_id = ?`,
       )
-      .bind(empresa.id, cliente.id)
+      .bind(agora, agora, empresa.id, cliente.id)
       .all<{
         produto_id: number;
         quantidade: number;
@@ -141,11 +147,16 @@ const { results: itens } = await db()
             p.estoque_atual, p.foto
        FROM loja_carrinho c
        JOIN produtos p ON p.id = c.produto_id AND p.empresa_id = c.empresa_id
-       LEFT JOIN loja_ofertas o ON o.produto_id = p.id AND o.empresa_id = p.empresa_id AND o.ativa = 1
+       LEFT JOIN loja_ofertas o
+         ON o.produto_id = p.id
+        AND o.empresa_id = p.empresa_id
+        AND o.ativa = 1
+        AND (o.inicio_em IS NULL OR o.inicio_em = '' OR o.inicio_em <= ?)
+        AND (o.fim_em IS NULL OR o.fim_em = '' OR o.fim_em >= ?)
       WHERE c.empresa_id = ? AND c.parceiro_id = ?
       ORDER BY c.id ASC`,
   )
-  .bind(empresa.id, cliente.id)
+  .bind(agora, agora, empresa.id, cliente.id)
   .all<{
     produto_id: number;
     quantidade: number;

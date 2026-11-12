@@ -1,11 +1,12 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
-import { formatMoney, formatQty, parseNum, str } from '../../lib/validate';
+import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, parseNum, str } from '../../lib/validate';
 
 const u = Astro.locals.user!;
 let erro = '';
 let ok = '';
+const agora = nowLocalIso();
 
 if (Astro.request.method === 'POST') {
   const f = await Astro.request.formData();
@@ -15,6 +16,8 @@ if (Astro.request.method === 'POST') {
     const produtoId = Number(f.get('produto_id')) || 0;
     const tituloOferta = str(f, 'titulo_oferta', 60);
     const ordem = Number(f.get('ordem')) || 0;
+    const inicioEm = str(f, 'inicio_em', 25);
+    const fimEm = str(f, 'fim_em', 25);
 
     const prod = await db()
       .prepare('SELECT id, nome, preco_venda FROM produtos WHERE id = ? AND empresa_id = ?')
@@ -23,21 +26,25 @@ if (Astro.request.method === 'POST') {
 
     if (!prod) {
       erro = 'Selecione um produto válido.';
+    } else if (inicioEm && fimEm && fimEm < inicioEm) {
+      erro = 'A data/hora de fim da oferta não pode ser anterior à data/hora de início.';
     } else {
       const precoInformado = parseNum(f.get('preco_oferta'), -1);
       const precoOferta = precoInformado >= 0 ? precoInformado : Number(prod.preco_venda);
 
       await db()
         .prepare(
-          `INSERT INTO loja_ofertas (empresa_id, produto_id, titulo_oferta, preco_oferta, ordem, ativa)
-           VALUES (?, ?, ?, ?, ?, 1)
+          `INSERT INTO loja_ofertas (empresa_id, produto_id, titulo_oferta, preco_oferta, ordem, ativa, inicio_em, fim_em)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)
            ON CONFLICT (empresa_id, produto_id)
            DO UPDATE SET titulo_oferta = excluded.titulo_oferta,
                          preco_oferta = excluded.preco_oferta,
                          ordem = excluded.ordem,
+                         inicio_em = excluded.inicio_em,
+                         fim_em = excluded.fim_em,
                          ativa = 1`,
         )
-        .bind(u.empresaId, prod.id, tituloOferta || null, precoOferta, ordem)
+        .bind(u.empresaId, prod.id, tituloOferta || null, precoOferta, ordem, inicioEm || null, fimEm || null)
         .run();
 
       ok = `Produto "${prod.nome}" incluído no carrossel de ofertas da loja!`;
@@ -46,9 +53,13 @@ if (Astro.request.method === 'POST') {
     const ids = f.getAll('produtos_ids').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
     const descPerc = Math.max(0, Math.min(90, parseNum(f.get('desconto_perc'), 0)));
     const seloPadrao = str(f, 'titulo_lote', 60);
+    const inicioEm = str(f, 'inicio_em', 25);
+    const fimEm = str(f, 'fim_em', 25);
 
     if (ids.length === 0) {
       erro = 'Marque ao menos um produto para incluir nas ofertas.';
+    } else if (inicioEm && fimEm && fimEm < inicioEm) {
+      erro = 'A data/hora de fim da oferta não pode ser anterior à data/hora de início.';
     } else {
       let count = 0;
       for (const pid of ids) {
@@ -64,14 +75,16 @@ if (Astro.request.method === 'POST') {
 
         await db()
           .prepare(
-            `INSERT INTO loja_ofertas (empresa_id, produto_id, titulo_oferta, preco_oferta, ordem, ativa)
-             VALUES (?, ?, ?, ?, 0, 1)
+            `INSERT INTO loja_ofertas (empresa_id, produto_id, titulo_oferta, preco_oferta, ordem, ativa, inicio_em, fim_em)
+             VALUES (?, ?, ?, ?, 0, 1, ?, ?)
              ON CONFLICT (empresa_id, produto_id)
              DO UPDATE SET titulo_oferta = COALESCE(excluded.titulo_oferta, loja_ofertas.titulo_oferta),
                            preco_oferta = excluded.preco_oferta,
+                           inicio_em = COALESCE(excluded.inicio_em, loja_ofertas.inicio_em),
+                           fim_em = COALESCE(excluded.fim_em, loja_ofertas.fim_em),
                            ativa = 1`,
           )
-          .bind(u.empresaId, pr.id, seloPadrao || null, precoCalc)
+          .bind(u.empresaId, pr.id, seloPadrao || null, precoCalc, inicioEm || null, fimEm || null)
           .run();
         count++;
       }
@@ -82,17 +95,23 @@ if (Astro.request.method === 'POST') {
     const tituloOferta = str(f, 'titulo_oferta', 60);
     const precoOferta = Math.max(0, parseNum(f.get('preco_oferta'), 0));
     const ordem = Number(f.get('ordem')) || 0;
+    const inicioEm = str(f, 'inicio_em', 25);
+    const fimEm = str(f, 'fim_em', 25);
     const ativa = f.get('ativa') ? 1 : 0;
 
-    await db()
-      .prepare(
-        `UPDATE loja_ofertas
-            SET titulo_oferta = ?, preco_oferta = ?, ordem = ?, ativa = ?
-          WHERE id = ? AND empresa_id = ?`,
-      )
-      .bind(tituloOferta || null, precoOferta, ordem, ativa, ofertaId, u.empresaId)
-      .run();
-    ok = 'Oferta atualizada com sucesso!';
+    if (inicioEm && fimEm && fimEm < inicioEm) {
+      erro = 'A data/hora de fim da oferta não pode ser anterior à data/hora de início.';
+    } else {
+      await db()
+        .prepare(
+          `UPDATE loja_ofertas
+              SET titulo_oferta = ?, preco_oferta = ?, ordem = ?, inicio_em = ?, fim_em = ?, ativa = ?
+            WHERE id = ? AND empresa_id = ?`,
+        )
+        .bind(tituloOferta || null, precoOferta, ordem, inicioEm || null, fimEm || null, ativa, ofertaId, u.empresaId)
+        .run();
+      ok = 'Oferta atualizada com sucesso!';
+    }
   } else if (acao === 'remover') {
     const ofertaId = Number(f.get('oferta_id')) || 0;
     await db()
@@ -105,7 +124,7 @@ if (Astro.request.method === 'POST') {
 
 const { results: ofertas } = await db()
   .prepare(
-    `SELECT o.id, o.produto_id, o.titulo_oferta, o.preco_oferta, o.ordem, o.ativa, o.criado_em,
+    `SELECT o.id, o.produto_id, o.titulo_oferta, o.preco_oferta, o.ordem, o.ativa, o.inicio_em, o.fim_em, o.criado_em,
             p.codigo, p.nome, p.categoria, p.unidade, p.preco_venda, p.estoque_atual, p.foto, p.ativo AS prod_ativo
        FROM loja_ofertas o
        JOIN produtos p ON p.id = o.produto_id AND p.empresa_id = o.empresa_id
@@ -177,6 +196,14 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
             <label>Ordem</label>
             <input name="ordem" type="number" value="0" />
           </div>
+          <div class="c6">
+            <label>Data e Hora de Início</label>
+            <input name="inicio_em" type="datetime-local" value={agora} />
+          </div>
+          <div class="c6">
+            <label>Data e Hora de Fim</label>
+            <input name="fim_em" type="datetime-local" />
+          </div>
           <div class="c12">
             <button style="width:100%">Adicionar ao Carrossel de Ofertas</button>
           </div>
@@ -191,7 +218,7 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
         <div class="grid">
           <div class="c12">
             <label>Marque os produtos para exibir no carrossel</label>
-            <div style="max-height:118px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;padding:8px;background:#f9fafb">
+            <div style="max-height:112px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;padding:8px;background:#f9fafb">
               {todosProdutos.length === 0 ? (
                 <div class="muted" style="font-size:13px">Nenhum produto ativo cadastrado.</div>
               ) : (
@@ -215,6 +242,14 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
             <label>Selo padrão (opcional)</label>
             <input name="titulo_lote" placeholder="Ex: DESTAQUE" />
           </div>
+          <div class="c6">
+            <label>Data e Hora de Início</label>
+            <input name="inicio_em" type="datetime-local" value={agora} />
+          </div>
+          <div class="c6">
+            <label>Data e Hora de Fim</label>
+            <input name="fim_em" type="datetime-local" />
+          </div>
           <div class="c12">
             <button style="width:100%" class="btn sec">Incluir / Atualizar Selecionados</button>
           </div>
@@ -228,7 +263,7 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
       <h2 style="margin:0">Produtos no Carrossel de Ofertas ({ofertas.length})</h2>
       <span class="spacer"></span>
       <span class="muted" style="font-size:12px">
-        Apenas ofertas ativas com estoque disponível (≥ 1) aparecem no carrossel da loja.
+        Apenas ofertas ativas, dentro do período de início/fim e com estoque disponível (≥ 1) aparecem na loja.
       </span>
     </div>
 
@@ -239,10 +274,10 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
             <th>Produto</th>
             <th>Estoque</th>
             <th>Preço Original</th>
-            <th>Preço em Oferta (R$)</th>
-            <th>Selo / Chamada</th>
-            <th>Ordem</th>
-            <th>Ativa</th>
+            <th>Preço Oferta (R$)</th>
+            <th>Início / Fim da Oferta</th>
+            <th>Selo / Ordem</th>
+            <th>Situação</th>
             <th>Ações</th>
           </tr>
         </thead>
@@ -260,6 +295,8 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
                 ? Math.round(((o.preco_venda - o.preco_oferta) / o.preco_venda) * 100)
                 : 0;
             const formId = `f-of-${o.id}`;
+            const agendada = o.inicio_em && o.inicio_em > agora;
+            const expirada = o.fim_em && o.fim_em < agora;
             return (
               <tr>
                 <td>
@@ -314,31 +351,68 @@ const urlLoja = `/loja/${u.empresaCodigo}`;
                     step="0.01"
                     min="0"
                     value={o.preco_oferta}
-                    style="width:110px"
+                    style="width:100px"
                   />
                 </td>
                 <td>
-                  <input
-                    form={formId}
-                    name="titulo_oferta"
-                    value={o.titulo_oferta ?? ''}
-                    placeholder="OFERTA"
-                    style="width:145px"
-                  />
+                  <div style="display:flex;flex-direction:column;gap:4px;min-width:175px">
+                    <div class="row" style="gap:4px;flex-wrap:nowrap">
+                      <span class="muted" style="font-size:11px;width:34px">Início:</span>
+                      <input
+                        form={formId}
+                        name="inicio_em"
+                        type="datetime-local"
+                        value={o.inicio_em ?? ''}
+                        style="font-size:12px;padding:4px 6px"
+                      />
+                    </div>
+                    <div class="row" style="gap:4px;flex-wrap:nowrap">
+                      <span class="muted" style="font-size:11px;width:34px">Fim:</span>
+                      <input
+                        form={formId}
+                        name="fim_em"
+                        type="datetime-local"
+                        value={o.fim_em ?? ''}
+                        style="font-size:12px;padding:4px 6px"
+                      />
+                    </div>
+                  </div>
                 </td>
                 <td>
-                  <input
-                    form={formId}
-                    name="ordem"
-                    type="number"
-                    value={o.ordem}
-                    style="width:68px"
-                  />
+                  <div style="display:flex;flex-direction:column;gap:4px">
+                    <input
+                      form={formId}
+                      name="titulo_oferta"
+                      value={o.titulo_oferta ?? ''}
+                      placeholder="Selo (ex: OFERTA)"
+                      style="width:130px;font-size:12px;padding:4px 6px"
+                    />
+                    <div class="row" style="gap:4px">
+                      <span class="muted" style="font-size:11px">Ordem:</span>
+                      <input
+                        form={formId}
+                        name="ordem"
+                        type="number"
+                        value={o.ordem}
+                        style="width:60px;font-size:12px;padding:4px 6px"
+                      />
+                    </div>
+                  </div>
                 </td>
                 <td>
-                  <label class="check">
+                  <label class="check" style="margin-bottom:4px">
                     <input form={formId} type="checkbox" name="ativa" value="1" checked={!!o.ativa} />
+                    <span style="font-size:12px">Ativa</span>
                   </label>
+                  {!o.ativa ? (
+                    <span class="tag off">Pausada</span>
+                  ) : expirada ? (
+                    <span class="tag off" title={`Encerrada em ${formatDateTimeBr(o.fim_em)}`}>Encerrada</span>
+                  ) : agendada ? (
+                    <span class="tag f" title={`Inicia em ${formatDateTimeBr(o.inicio_em)}`}>Agendada</span>
+                  ) : (
+                    <span class="tag" style="background:#dcfce7;color:#166534">No ar</span>
+                  )}
                 </td>
                 <td>
                   <div class="row" style="gap:6px;flex-wrap:nowrap">

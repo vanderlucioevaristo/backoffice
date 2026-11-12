@@ -1,0 +1,276 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { str, parseNum, formatDoc, formatQty } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+
+const { results: clientes } = await db()
+  .prepare('SELECT id, nome, documento FROM parceiros WHERE empresa_id = ? AND eh_cliente = 1 AND ativo = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string; documento: string | null }>();
+
+const { results: produtos } = await db()
+  .prepare('SELECT id, codigo, nome, unidade, preco_custo, preco_venda, estoque_atual FROM produtos WHERE empresa_id = ? AND ativo = 1 AND estoque_atual >= 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; codigo: string | null; nome: string; unidade: string; preco_custo: number; preco_venda: number; estoque_atual: number }>();
+
+type ItemPed = { produto_id: number; quantidade: number; preco_unitario: number };
+
+let erro = '';
+let parceiroId = 0;
+let valorDesconto = 0;
+let observacoes = '';
+let itens: ItemPed[] = [];
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  parceiroId = Number(f.get('parceiro_id')) || 0;
+  valorDesconto = Math.max(0, parseNum(f.get('valor_desconto'), 0));
+  observacoes = str(f, 'observacoes', 1000);
+
+  const pIds = f.getAll('produto_id').map((x) => Number(x));
+  const qtds = f.getAll('quantidade').map((x) => parseNum(x, 0));
+  const precos = f.getAll('preco_unitario').map((x) => parseNum(x, -1));
+
+  const prodMap = new Map(produtos.map((p) => [p.id, p]));
+  const cliOk = clientes.some((c) => c.id === parceiroId);
+
+  itens = [];
+  for (let i = 0; i < pIds.length; i++) {
+    if (!pIds[i] && !qtds[i]) continue;
+    itens.push({ produto_id: pIds[i], quantidade: qtds[i], preco_unitario: precos[i] });
+  }
+
+  if (!cliOk) erro = 'Selecione um cliente válido.';
+  else if (itens.length === 0) erro = 'Adicione pelo menos um produto ao pedido.';
+  else {
+    for (const it of itens) {
+      const pr = prodMap.get(it.produto_id);
+      if (!pr) {
+        erro = 'Selecione um produto válido em todas as linhas.';
+        break;
+      }
+      if (it.quantidade <= 0) {
+        erro = 'A quantidade deve ser maior que zero.';
+        break;
+      }
+      if (it.quantidade > pr.estoque_atual) {
+        erro = `Quantidade solicitada de "${pr.nome}" (${formatQty(it.quantidade)}) excede o estoque disponível (${formatQty(pr.estoque_atual)}).`;
+        break;
+      }
+      if (it.preco_unitario < 0) {
+        erro = 'Informe um preço unitário válido.';
+        break;
+      }
+    }
+  }
+
+  if (!erro) {
+    const subtotalItens = itens.reduce((acc, it) => acc + it.quantidade * it.preco_unitario, 0);
+    const totalPedido = Math.max(0, subtotalItens - valorDesconto);
+
+    const ped = await db()
+      .prepare(
+        `INSERT INTO loja_pedidos (empresa_id, parceiro_id, valor_total, valor_desconto, observacoes, status, origem)
+         VALUES (?, ?, ?, ?, ?, 'novo', 'INTERNO') RETURNING id`,
+      )
+      .bind(u.empresaId, parceiroId, totalPedido, valorDesconto, observacoes || null)
+      .first<{ id: number }>();
+
+    const pedidoId = ped!.id;
+
+    for (const it of itens) {
+      const pr = prodMap.get(it.produto_id)!;
+      const sub = it.quantidade * it.preco_unitario;
+
+      await db()
+        .prepare(
+          `INSERT INTO loja_pedidos_itens (empresa_id, pedido_id, produto_id, quantidade, preco_unitario, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(u.empresaId, pedidoId, it.produto_id, it.quantidade, it.preco_unitario, sub)
+        .run();
+
+      const saldoAnt = Number(pr.estoque_atual);
+      const saldoPost = saldoAnt - it.quantidade;
+
+      await db()
+        .prepare("UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+        .bind(saldoPost, it.produto_id, u.empresaId)
+        .run();
+
+      await db()
+        .prepare(
+          `INSERT INTO estoque_movimentacoes
+             (empresa_id, produto_id, tipo, origem, referencia_id, quantidade, saldo_anterior, saldo_posterior, custo_unitario, observacao, usuario_id)
+           VALUES (?, ?, 'S', 'VENDA', ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          u.empresaId,
+          it.produto_id,
+          pedidoId,
+          -it.quantidade,
+          saldoAnt,
+          saldoPost,
+          pr.preco_custo,
+          `Venda Pedido #${pedidoId}`,
+          u.id,
+        )
+        .run();
+    }
+
+    return Astro.redirect('/pedidos?ok=salvo');
+  }
+}
+
+const rowsToRender: ItemPed[] = itens.length > 0 ? itens : [{ produto_id: 0, quantidade: 1, preco_unitario: 0 }];
+---
+<Layout title="Novo Pedido" active="pedidos">
+  <div class="row">
+    <h1>Novo Pedido de Cliente</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/pedidos">← Voltar</a>
+  </div>
+  {erro && <div class="msg err">{erro}</div>}
+
+  <form method="post" id="form-pedido">
+    <div class="card">
+      <h2>Cliente</h2>
+      <div class="grid">
+        <div class="c8">
+          <label>Cliente *</label>
+          <select name="parceiro_id" required>
+            <option value="">— Selecione o cliente —</option>
+            {clientes.map((c) => (
+              <option value={c.id} selected={parceiroId === c.id}>
+                {c.nome}{c.documento ? ` (${formatDoc(c.documento)})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div class="c4">
+          <label>&nbsp;</label>
+          <a class="btn sec" href="/clientes/novo" target="_blank">+ Cadastrar novo cliente</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">Itens do Pedido</h2>
+        <span class="spacer"></span>
+        <button type="button" class="btn sec" id="btn-add-it" style="font-size:13px;padding:5px 10px">+ Adicionar produto</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:44%">Produto em estoque *</th>
+              <th style="width:16%">Quantidade *</th>
+              <th style="width:18%">Preço unitário (R$) *</th>
+              <th style="width:18%">Subtotal (R$)</th>
+              <th style="width:4%"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody-it">
+            {rowsToRender.map((it) => (
+              <tr class="it-row">
+                <td>
+                  <select name="produto_id" class="sel-prod" required>
+                    <option value="">— Selecione um produto —</option>
+                    {produtos.map((pr) => (
+                      <option value={pr.id} data-venda={pr.preco_venda} data-est={pr.estoque_atual} selected={it.produto_id === pr.id}>
+                        {pr.codigo ? `[${pr.codigo}] ` : ''}{pr.nome} (disp: {formatQty(pr.estoque_atual)} {pr.unidade})
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td><input name="quantidade" class="inp-qtd" type="number" step="0.001" min="0.001" value={it.quantidade} required /></td>
+                <td><input name="preco_unitario" class="inp-preco" type="number" step="0.01" min="0" value={it.preco_unitario} required /></td>
+                <td><input class="inp-sub" readonly tabindex="-1" style="background:#f9fafb;font-weight:600" value="0,00" /></td>
+                <td><button type="button" class="btn sec btn-rm-it" style="padding:4px 8px">✕</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div class="c6">
+          <label>Observações do pedido</label>
+          <input name="observacoes" value={observacoes} placeholder="Condições de entrega, observações..." />
+        </div>
+        <div class="c3">
+          <label>Desconto (R$)</label>
+          <input name="valor_desconto" id="inp-desc" type="number" step="0.01" min="0" value={valorDesconto} />
+        </div>
+        <div class="c3">
+          <label>Total do Pedido (R$)</label>
+          <input id="tot-ped" readonly tabindex="-1" style="background:#eef2ff;font-weight:700;color:#1e3a8a" />
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button>Salvar pedido e baixar estoque</button>
+      <a class="btn sec" href="/pedidos">Cancelar</a>
+    </div>
+  </form>
+</Layout>
+
+<script is:inline>
+  const tbody = document.getElementById('tbody-it');
+  const btnAdd = document.getElementById('btn-add-it');
+  const inpDesc = document.getElementById('inp-desc');
+  const totPed = document.getElementById('tot-ped');
+  const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function recalc() {
+    let soma = 0;
+    tbody.querySelectorAll('tr.it-row').forEach((tr) => {
+      const q = parseFloat(tr.querySelector('.inp-qtd').value) || 0;
+      const p = parseFloat(tr.querySelector('.inp-preco').value) || 0;
+      const sub = q * p;
+      soma += sub;
+      tr.querySelector('.inp-sub').value = fmt(sub);
+    });
+    const d = parseFloat(inpDesc.value) || 0;
+    totPed.value = fmt(Math.max(0, soma - d));
+  }
+
+  tbody.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('sel-prod')) return;
+    const tr = e.target.closest('tr.it-row');
+    const opt = e.target.selectedOptions[0];
+    if (opt && opt.value) {
+      tr.querySelector('.inp-preco').value = opt.dataset.venda || 0;
+    }
+    recalc();
+  });
+  tbody.addEventListener('input', recalc);
+  inpDesc.addEventListener('input', recalc);
+
+  btnAdd.addEventListener('click', () => {
+    const clone = tbody.querySelector('tr.it-row').cloneNode(true);
+    clone.querySelector('.sel-prod').value = '';
+    clone.querySelector('.inp-qtd').value = '1';
+    clone.querySelector('.inp-preco').value = '0';
+    clone.querySelector('.inp-sub').value = '0,00';
+    tbody.appendChild(clone);
+    recalc();
+  });
+
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-rm-it');
+    if (!btn) return;
+    const rows = tbody.querySelectorAll('tr.it-row');
+    const tr = btn.closest('tr.it-row');
+    if (rows.length > 1) tr.remove();
+    recalc();
+  });
+
+  recalc();
+</script>

@@ -219,17 +219,139 @@ const rowsToRender: ItemForm[] =
   itens.length > 0 ? itens : [{ produto_id: 0, quantidade: 1, valor_unitario: 0, novo_preco_venda: null }];
 ---
 <Layout title="Dar entrada em Nota Fiscal" active="notas">
-  <h1>Dar entrada em Nota Fiscal (Compra)</h1>
+  <div class="row" style="margin-bottom:16px">
+    <h1 style="margin:0">Dar entrada em Nota Fiscal (Compra)</h1>
+    <span class="spacer"></span>
+    <button type="button" class="btn sec" id="btn-auto-nf">⚡ Cadastro automático</button>
+  </div>
   {erro && <div class="msg err">{erro}</div>}
+  <div id="nf-auto-aviso" class="msg ok" style="display:none"></div>
+
+  <dialog id="dlg-auto-nf" class="modal" style="max-width:520px">
+    <form method="dialog" id="form-auto-nf">
+      <h2>Cadastro automático de NF-e</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Informe a Chave de Acesso da NF-e (44 dígitos) ou selecione o arquivo XML da nota fiscal eletrônica para carregar os dados automaticamente.
+      </p>
+      <div id="nf-auto-erro" class="msg err" style="display:none"></div>
+      <p>
+        <label for="inp-auto-chave">Chave de acesso / Nº da NF-e (44 dígitos)</label>
+        <input
+          id="inp-auto-chave"
+          placeholder="Digite ou leia no código de barras os 44 dígitos da NF-e"
+          inputmode="numeric"
+          maxlength="54"
+          autocomplete="off"
+        />
+      </p>
+      <p>
+        <label for="inp-auto-xml">Ou arquivo XML da NF-e (carrega cabeçalho + todos os produtos e valores)</label>
+        <input id="inp-auto-xml" type="file" accept=".xml,text/xml,application/xml" />
+      </p>
+      <div class="row" style="justify-content:flex-end;margin-top:16px">
+        <button type="button" class="btn sec" id="btn-auto-nf-fechar">Cancelar</button>
+        <button type="submit" id="btn-auto-nf-buscar">Buscar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-sug-forn" class="modal" style="max-width:620px">
+    <form method="dialog" id="form-sug-forn">
+      <h2>Cadastrar fornecedor da Nota Fiscal?</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        O emitente desta NF-e ainda não está no seu cadastro de fornecedores. Confira os dados abaixo e confirme para cadastrá-lo automaticamente.
+      </p>
+      <div id="sug-forn-erro" class="msg err" style="display:none"></div>
+      <div class="grid">
+        <div class="c4">
+          <label>CNPJ / CPF</label>
+          <input id="sf-doc" required />
+        </div>
+        <div class="c4">
+          <label>Inscrição Estadual</label>
+          <input id="sf-ie" />
+        </div>
+        <div class="c4">
+          <label>Telefone</label>
+          <input id="sf-fone" />
+        </div>
+        <div class="c8">
+          <label>Razão Social / Nome *</label>
+          <input id="sf-nome" required />
+        </div>
+        <div class="c4">
+          <label>Nome Fantasia</label>
+          <input id="sf-fantasia" />
+        </div>
+        <div class="c3">
+          <label>CEP</label>
+          <input id="sf-cep" />
+        </div>
+        <div class="c6">
+          <label>Logradouro</label>
+          <input id="sf-logr" />
+        </div>
+        <div class="c3">
+          <label>Número</label>
+          <input id="sf-num" />
+        </div>
+        <div class="c4">
+          <label>Bairro</label>
+          <input id="sf-bairro" />
+        </div>
+        <div class="c6">
+          <label>Cidade</label>
+          <input id="sf-cid" />
+        </div>
+        <div class="c2">
+          <label>UF</label>
+          <input id="sf-uf" maxlength="2" style="text-transform:uppercase" />
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:16px">
+        <button type="button" class="btn sec" id="btn-forn-ignorar">Não cadastrar agora</button>
+        <button type="submit" id="btn-forn-confirmar">✓ Confirmar e cadastrar fornecedor</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-sug-prod" class="modal" style="max-width:780px">
+    <form method="dialog" id="form-sug-prod">
+      <h2>Cadastrar produtos encontrados na Nota Fiscal?</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Os produtos abaixo constam na NF-e e ainda não estão no seu cadastro de produtos. Confira os dados, informe o preço de venda sugerido e confirme para incluí-los automaticamente no cadastro antes de dar entrada na nota.
+      </p>
+      <div id="sug-prod-erro" class="msg err" style="display:none"></div>
+      <div class="tbl-wrap" style="max-height:320px;overflow-y:auto">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:4%"></th>
+              <th style="width:16%">Código</th>
+              <th style="width:36%">Nome do Produto</th>
+              <th style="width:10%">Unid.</th>
+              <th style="width:16%">Custo NF (R$)</th>
+              <th style="width:18%">Preço Venda (R$)</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-sug-prod"></tbody>
+        </table>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:16px">
+        <button type="button" class="btn sec" id="btn-sug-ignorar">Não cadastrar agora</button>
+        <button type="submit" id="btn-sug-confirmar">✓ Confirmar e incluir no cadastro de produtos</button>
+      </div>
+    </form>
+  </dialog>
 
   {fornecedores.length === 0 && (
-    <div class="msg err">
-      Você ainda não possui fornecedores ativos cadastrados. <a href="/clientes/novo">Cadastre um fornecedor primeiro</a>.
+    <div class="msg err" id="aviso-sem-fornecedores">
+      Você ainda não possui fornecedores ativos cadastrados. Use o botão <strong>⚡ Cadastro automático</strong> para importar e cadastrar o fornecedor direto da NF-e ou <a href="/clientes/novo">cadastre manualmente</a>.
     </div>
   )}
   {produtos.length === 0 && (
-    <div class="msg err">
-      Você ainda não possui produtos ativos cadastrados. <a href="/produtos/novo">Cadastre os produtos antes de lançar a NF</a>.
+    <div class="msg err" id="aviso-sem-produtos">
+      Você ainda não possui produtos ativos cadastrados. Use o botão <strong>⚡ Cadastro automático</strong> para importar e cadastrar os produtos direto da NF-e ou <a href="/produtos/novo">cadastre manualmente</a>.
     </div>
   )}
 
@@ -374,7 +496,7 @@ const rowsToRender: ItemForm[] =
     </div>
 
     <div class="row">
-      <button disabled={fornecedores.length === 0 || produtos.length === 0}>Confirmar entrada e alimentar estoque</button>
+      <button id="btn-submit-nf">Confirmar entrada e alimentar estoque</button>
       <a class="btn sec" href="/notas-entrada">Cancelar</a>
     </div>
   </form>
@@ -454,4 +576,370 @@ const rowsToRender: ItemForm[] =
   });
 
   recalc();
+
+  // Cadastro automático de NF-e (via chave de 44 dígitos ou XML da NF-e)
+  const dlgNf = document.getElementById('dlg-auto-nf');
+  const btnAutoNf = document.getElementById('btn-auto-nf');
+  const btnFecharNf = document.getElementById('btn-auto-nf-fechar');
+  const btnBuscarNf = document.getElementById('btn-auto-nf-buscar');
+  const formAutoNf = document.getElementById('form-auto-nf');
+  const inpChave = document.getElementById('inp-auto-chave');
+  const inpXml = document.getElementById('inp-auto-xml');
+  const boxErroNf = document.getElementById('nf-auto-erro');
+  const boxAvisoNf = document.getElementById('nf-auto-aviso');
+  const formNf = document.getElementById('form-nf');
+
+  function abrirDialogoNf() {
+    boxErroNf.style.display = 'none';
+    boxErroNf.textContent = '';
+    const chaveAtual = formNf.querySelector('[name="chave_acesso"]')?.value || '';
+    if (chaveAtual && !inpChave.value) inpChave.value = chaveAtual;
+    dlgNf.showModal();
+    setTimeout(() => inpChave.focus(), 50);
+  }
+
+  btnAutoNf.addEventListener('click', abrirDialogoNf);
+  btnFecharNf.addEventListener('click', () => dlgNf.close());
+  dlgNf.addEventListener('click', (e) => {
+    if (e.target === dlgNf) dlgNf.close();
+  });
+
+  if (new URLSearchParams(location.search).get('auto') === '1') {
+    abrirDialogoNf();
+  }
+
+  function preencherLinhaItem(tr, it) {
+    const sel = tr.querySelector('.sel-prod');
+    sel.value = it.produto_id ? String(it.produto_id) : '';
+    tr.querySelector('.inp-qtd').value = it.quantidade || 1;
+    tr.querySelector('.inp-unit').value = it.valor_unitario ?? 0;
+    const vendaEl = tr.querySelector('.inp-venda');
+    vendaEl.value = it.preco_venda_atual ?? '';
+    let hint = tr.querySelector('.nfe-item-hint');
+    if (it.nome && !it.produto_id) {
+      if (!hint) {
+        hint = document.createElement('div');
+        hint.className = 'nfe-item-hint muted';
+        hint.style.fontSize = '12px';
+        hint.style.color = 'var(--dg)';
+        sel.parentElement.appendChild(hint);
+      }
+      hint.textContent = `Item na NF-e: [${it.codigo || 's/cód'}] ${it.nome} — selecione o produto cadastrado`;
+    } else if (hint) {
+      hint.remove();
+    }
+  }
+
+  formAutoNf.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    boxErroNf.style.display = 'none';
+
+    const chave = (inpChave.value || '').replace(/\D/g, '');
+    const file = inpXml.files && inpXml.files[0];
+
+    if (!chave && !file) {
+      boxErroNf.textContent = 'Informe a chave de acesso da NF-e (44 dígitos) ou selecione o arquivo XML.';
+      boxErroNf.style.display = 'block';
+      return;
+    }
+
+    btnBuscarNf.disabled = true;
+    const txtOrig = btnBuscarNf.textContent;
+    btnBuscarNf.textContent = 'Buscando NF-e...';
+
+    try {
+      const xmlText = file ? await file.text() : '';
+      const res = await fetch('/api/consulta-nfe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chave, xml: xmlText }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.erro) {
+        boxErroNf.textContent = data.erro || 'Não foi possível carregar os dados da NF-e.';
+        boxErroNf.style.display = 'block';
+        return;
+      }
+
+      const nf = data.nota || {};
+      if (nf.fornecedor_id) formNf.querySelector('[name="fornecedor_id"]').value = String(nf.fornecedor_id);
+      if (nf.numero) formNf.querySelector('[name="numero"]').value = nf.numero;
+      if (nf.serie !== undefined) formNf.querySelector('[name="serie"]').value = nf.serie;
+      if (nf.data_emissao) formNf.querySelector('[name="data_emissao"]').value = nf.data_emissao;
+      if (nf.chave_acesso) formNf.querySelector('[name="chave_acesso"]').value = nf.chave_acesso;
+      if (nf.valor_frete !== undefined) inpFrete.value = nf.valor_frete;
+      if (nf.valor_desconto !== undefined) inpDesc.value = nf.valor_desconto;
+      if (nf.valor_outros !== undefined) inpOutros.value = nf.valor_outros;
+      if (nf.observacoes) formNf.querySelector('[name="observacoes"]').value = nf.observacoes;
+
+      if (Array.isArray(nf.itens) && nf.itens.length > 0) {
+        const template = tbody.querySelector('tr.item-row').cloneNode(true);
+        tbody.innerHTML = '';
+        nf.itens.forEach((it) => {
+          const row = template.cloneNode(true);
+          preencherLinhaItem(row, it);
+          tbody.appendChild(row);
+        });
+      }
+
+      recalc();
+      dlgNf.close();
+
+      // Itens da NF-e que ainda não estão cadastrados como produtos
+      const itensNovos = (nf.itens || [])
+        .map((it, idx) => ({ ...it, idx }))
+        .filter((it) => !it.produto_id && it.nome);
+
+      // Se o fornecedor emitente da NF-e ainda não está cadastrado, sugere primeiro o cadastro do fornecedor
+      // e, logo em seguida, sugere o cadastro dos produtos contidos na nota
+      if (!nf.fornecedor_id && (nf.emitente_cnpj || (nf.emitente && nf.emitente.nome))) {
+        abrirSugestaoFornecedor(nf.emitente || { documento: nf.emitente_cnpj, nome: nf.emitente_nome }, itensNovos, data.aviso);
+      } else if (itensNovos.length > 0) {
+        abrirSugestaoProdutos(itensNovos, nf.fornecedor_id || Number(formNf.querySelector('[name="fornecedor_id"]').value) || 0);
+      } else if (data.aviso) {
+        boxAvisoNf.textContent = data.aviso;
+        boxAvisoNf.style.display = 'block';
+      }
+    } catch {
+      boxErroNf.textContent = 'Falha ao consultar os dados da NF-e.';
+      boxErroNf.style.display = 'block';
+    } finally {
+      btnBuscarNf.disabled = false;
+      btnBuscarNf.textContent = txtOrig;
+    }
+  });
+
+  // Diálogo de sugestão e confirmação de cadastro do FORNECEDOR emitente da NF-e
+  const dlgSugForn = document.getElementById('dlg-sug-forn');
+  const formSugForn = document.getElementById('form-sug-forn');
+  const btnIgnorarForn = document.getElementById('btn-forn-ignorar');
+  const btnConfirmarForn = document.getElementById('btn-forn-confirmar');
+  const boxErroForn = document.getElementById('sug-forn-erro');
+  let filaItensNovosPosForn = [];
+  let avisoPosForn = '';
+
+  function abrirSugestaoFornecedor(emit, itensNovos, aviso) {
+    filaItensNovosPosForn = itensNovos || [];
+    avisoPosForn = aviso || '';
+    boxErroForn.style.display = 'none';
+
+    document.getElementById('sf-doc').value = emit.documento || '';
+    document.getElementById('sf-ie').value = emit.rg_ie || '';
+    document.getElementById('sf-fone').value = emit.telefone || '';
+    document.getElementById('sf-nome').value = emit.nome || '';
+    document.getElementById('sf-fantasia').value = emit.nome_fantasia || '';
+    document.getElementById('sf-cep').value = emit.cep || '';
+    document.getElementById('sf-logr').value = emit.logradouro || '';
+    document.getElementById('sf-num').value = emit.numero || '';
+    document.getElementById('sf-bairro').value = emit.bairro || '';
+    document.getElementById('sf-cid').value = emit.cidade || '';
+    document.getElementById('sf-uf').value = emit.uf || '';
+
+    dlgSugForn.showModal();
+  }
+
+  function prosseguirParaProdutosSeHouver(fornId) {
+    if (filaItensNovosPosForn.length > 0) {
+      abrirSugestaoProdutos(filaItensNovosPosForn, fornId);
+      filaItensNovosPosForn = [];
+    } else if (avisoPosForn) {
+      boxAvisoNf.textContent = avisoPosForn;
+      boxAvisoNf.style.display = 'block';
+    }
+  }
+
+  btnIgnorarForn?.addEventListener('click', () => {
+    dlgSugForn.close();
+    prosseguirParaProdutosSeHouver(Number(formNf.querySelector('[name="fornecedor_id"]').value) || 0);
+  });
+
+  formSugForn?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    boxErroForn.style.display = 'none';
+    btnConfirmarForn.disabled = true;
+    const txtOrig = btnConfirmarForn.textContent;
+    btnConfirmarForn.textContent = 'Cadastrando fornecedor...';
+
+    try {
+      const payload = {
+        documento: document.getElementById('sf-doc').value,
+        rg_ie: document.getElementById('sf-ie').value,
+        telefone: document.getElementById('sf-fone').value,
+        nome: document.getElementById('sf-nome').value,
+        nome_fantasia: document.getElementById('sf-fantasia').value,
+        cep: document.getElementById('sf-cep').value,
+        logradouro: document.getElementById('sf-logr').value,
+        numero: document.getElementById('sf-num').value,
+        bairro: document.getElementById('sf-bairro').value,
+        cidade: document.getElementById('sf-cid').value,
+        uf: document.getElementById('sf-uf').value,
+      };
+      const res = await fetch('/api/cadastrar-fornecedor-nfe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || data.erro) {
+        boxErroForn.textContent = data.erro || 'Não foi possível cadastrar o fornecedor.';
+        boxErroForn.style.display = 'block';
+        return;
+      }
+
+      const fn = data.fornecedor;
+      const selForn = formNf.querySelector('[name="fornecedor_id"]');
+      let opt = selForn.querySelector(`option[value="${fn.id}"]`);
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = String(fn.id);
+        opt.textContent = fn.label || fn.nome;
+        selForn.appendChild(opt);
+      }
+      selForn.value = String(fn.id);
+
+      const avisoSemForn = document.getElementById('aviso-sem-fornecedores');
+      if (avisoSemForn) avisoSemForn.style.display = 'none';
+
+      dlgSugForn.close();
+      boxAvisoNf.textContent = `Fornecedor "${fn.nome}" cadastrado e selecionado na nota!`;
+      boxAvisoNf.style.display = 'block';
+
+      prosseguirParaProdutosSeHouver(fn.id);
+    } catch {
+      boxErroForn.textContent = 'Falha de comunicação ao cadastrar o fornecedor.';
+      boxErroForn.style.display = 'block';
+    } finally {
+      btnConfirmarForn.disabled = false;
+      btnConfirmarForn.textContent = txtOrig;
+    }
+  });
+
+  // Diálogo de sugestão e confirmação de cadastro dos produtos contidos na NF-e
+  const dlgSug = document.getElementById('dlg-sug-prod');
+  const formSug = document.getElementById('form-sug-prod');
+  const tbodySug = document.getElementById('tbody-sug-prod');
+  const btnIgnorarSug = document.getElementById('btn-sug-ignorar');
+  const btnConfirmarSug = document.getElementById('btn-sug-confirmar');
+  const boxErroSug = document.getElementById('sug-prod-erro');
+  let sugFornecedorId = 0;
+
+  function abrirSugestaoProdutos(itensNovos, fornId) {
+    sugFornecedorId = fornId;
+    boxErroSug.style.display = 'none';
+    tbodySug.innerHTML = '';
+
+    itensNovos.forEach((it) => {
+      const custo = Number(it.valor_unitario || 0);
+      const tr = document.createElement('tr');
+      tr.className = 'sug-row';
+      tr.dataset.idx = String(it.idx);
+      tr.dataset.ean = it.ean || '';
+      tr.dataset.ncm = it.ncm || '';
+
+      tr.innerHTML = `
+        <td style="text-align:center"><input type="checkbox" class="sug-chk" checked style="width:auto" /></td>
+        <td><input class="sug-cod" value="${(it.codigo || '').replace(/"/g, '&quot;')}" /></td>
+        <td><input class="sug-nome" value="${(it.nome || '').replace(/"/g, '&quot;')}" required /></td>
+        <td><input class="sug-un" value="${(it.unidade || 'UN').replace(/"/g, '&quot;')}" style="text-transform:uppercase" /></td>
+        <td><input class="sug-custo" type="number" step="0.01" min="0" value="${custo}" /></td>
+        <td><input class="sug-venda" type="number" step="0.01" min="0" value="${custo}" /></td>
+      `;
+      tbodySug.appendChild(tr);
+    });
+
+    dlgSug.showModal();
+  }
+
+  btnIgnorarSug?.addEventListener('click', () => dlgSug.close());
+
+  formSug?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    boxErroSug.style.display = 'none';
+
+    const selecionados = [];
+    tbodySug.querySelectorAll('tr.sug-row').forEach((tr) => {
+      if (!tr.querySelector('.sug-chk').checked) return;
+      selecionados.push({
+        idx: Number(tr.dataset.idx),
+        codigo: tr.querySelector('.sug-cod').value.trim(),
+        nome: tr.querySelector('.sug-nome').value.trim(),
+        unidade: tr.querySelector('.sug-un').value.trim() || 'UN',
+        ean: tr.dataset.ean || '',
+        ncm: tr.dataset.ncm || '',
+        preco_custo: parseFloat(tr.querySelector('.sug-custo').value) || 0,
+        preco_venda: parseFloat(tr.querySelector('.sug-venda').value) || 0,
+      });
+    });
+
+    if (selecionados.length === 0) {
+      dlgSug.close();
+      return;
+    }
+
+    btnConfirmarSug.disabled = true;
+    const txtOrig = btnConfirmarSug.textContent;
+    btnConfirmarSug.textContent = 'Cadastrando produtos...';
+
+    try {
+      const res = await fetch('/api/cadastrar-produtos-nfe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fornecedor_id: sugFornecedorId || Number(formNf.querySelector('[name="fornecedor_id"]').value) || 0,
+          produtos: selecionados,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.erro) {
+        boxErroSug.textContent = data.erro || 'Não foi possível cadastrar os produtos.';
+        boxErroSug.style.display = 'block';
+        return;
+      }
+
+      const criados = data.criados || [];
+      const allSelects = tbody.querySelectorAll('select.sel-prod');
+
+      // Adiciona os novos produtos nas listas <select> de todas as linhas da nota
+      criados.forEach((pr) => {
+        allSelects.forEach((sel) => {
+          if (!sel.querySelector(`option[value="${pr.id}"]`)) {
+            const opt = document.createElement('option');
+            opt.value = String(pr.id);
+            opt.dataset.un = pr.unidade;
+            opt.dataset.custo = String(pr.preco_custo);
+            opt.dataset.venda = String(pr.preco_venda);
+            opt.dataset.est = '0';
+            opt.textContent = `${pr.codigo ? `[${pr.codigo}] ` : ''}${pr.nome} (${pr.unidade} · est: 0)`;
+            sel.appendChild(opt);
+          }
+        });
+      });
+
+      // Seleciona automaticamente o produto recém-cadastrado na respectiva linha da NF
+      const rowsNf = tbody.querySelectorAll('tr.item-row');
+      criados.forEach((pr) => {
+        const tr = rowsNf[pr.idx];
+        if (!tr) return;
+        const sel = tr.querySelector('.sel-prod');
+        sel.value = String(pr.id);
+        const vendaEl = tr.querySelector('.inp-venda');
+        if (vendaEl && pr.preco_venda) vendaEl.value = pr.preco_venda;
+        const hint = tr.querySelector('.nfe-item-hint');
+        if (hint) hint.remove();
+      });
+
+      const avisoSemProd = document.getElementById('aviso-sem-produtos');
+      if (avisoSemProd) avisoSemProd.style.display = 'none';
+
+      dlgSug.close();
+      boxAvisoNf.textContent = `${criados.length} produto(s) incluído(s) no cadastro e vinculados aos itens da nota! Confira os dados e clique em "Confirmar entrada e alimentar estoque".`;
+      boxAvisoNf.style.display = 'block';
+    } catch {
+      boxErroSug.textContent = 'Falha de comunicação ao cadastrar os produtos.';
+      boxErroSug.style.display = 'block';
+    } finally {
+      btnConfirmarSug.disabled = false;
+      btnConfirmarSug.textContent = txtOrig;
+    }
+  });
 </script>

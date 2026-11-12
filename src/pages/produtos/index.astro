@@ -38,7 +38,7 @@ const W = where.join(' AND ');
 const total = (await db().prepare(`SELECT COUNT(*) n FROM produtos p WHERE ${W}`).bind(...args).first<{ n: number }>())!.n;
 const { results } = await db()
   .prepare(
-    `SELECT p.id, p.codigo, p.nome, p.categoria, p.marca, p.unidade,
+    `SELECT p.id, p.codigo, p.nome, p.categoria, p.marca, p.unidade, p.foto,
             p.preco_custo, p.preco_venda, p.estoque_atual, p.estoque_minimo, p.ativo,
             (SELECT GROUP_CONCAT(pa.nome, ', ')
                FROM produtos_fornecedores pf
@@ -110,12 +110,23 @@ const ok = sp.get('ok');
             <tr>
               <td class="muted">{r.codigo || '—'}</td>
               <td>
-                <a href={`/produtos/${r.id}`}>{r.nome}</a>
-                {(r.categoria || r.marca) && (
-                  <div class="muted" style="font-size:12px">
-                    {[r.categoria, r.marca].filter(Boolean).join(' · ')}
+                <div class="row" style="gap:10px;flex-wrap:nowrap">
+                  {r.foto && (
+                    <img
+                      src={r.foto}
+                      alt={r.nome}
+                      style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--bd);flex-shrink:0"
+                    />
+                  )}
+                  <div>
+                    <a href={`/produtos/${r.id}`}>{r.nome}</a>
+                    {(r.categoria || r.marca) && (
+                      <div class="muted" style="font-size:12px">
+                        {[r.categoria, r.marca].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </td>
               <td>{r.fornecedores_nomes || <span class="muted">—</span>}</td>
               <td>{formatMoney(r.preco_custo)}</td>

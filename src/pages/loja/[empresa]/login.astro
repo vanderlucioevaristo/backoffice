@@ -1,0 +1,86 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import {
+  db,
+  getLojaEmpresa,
+  getSessionClient,
+  createClientSession,
+  verifyPassword,
+  DUMMY_HASH,
+  CLIENT_SESSION_COOKIE,
+} from '../../../lib/auth';
+import { onlyDigits } from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
+if (token && (await getSessionClient(token, empCodigo))) {
+  return Astro.redirect(`/loja/${empCodigo}`);
+}
+
+let erro = '';
+let ident = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  ident = String(f.get('ident') ?? '').trim();
+  const senha = String(f.get('senha') ?? '');
+  const digits = onlyDigits(ident);
+
+  const parceiro = await db()
+    .prepare(
+      `SELECT id, senha_hash, eh_cliente, ativo
+         FROM parceiros
+        WHERE empresa_id = ?
+          AND ((documento IS NOT NULL AND documento <> '' AND documento = ?)
+            OR (email IS NOT NULL AND email <> '' AND lower(email) = ?))
+        LIMIT 1`,
+    )
+    .bind(empresa.id, digits || '__none__', ident.toLowerCase())
+    .first<{ id: number; senha_hash: string | null; eh_cliente: number; ativo: number }>();
+
+  if (parceiro && !parceiro.senha_hash) {
+    erro = 'Você já possui ficha em nossa loja, mas ainda não definiu uma senha. Clique em "Criar minha conta" abaixo informando seu CPF/CNPJ para ativar o acesso.';
+  } else {
+    const ok = parceiro?.senha_hash ? await verifyPassword(senha, parceiro.senha_hash) : await verifyPassword(senha, DUMMY_HASH);
+    if (parceiro && parceiro.ativo === 1 && parceiro.eh_cliente === 1 && parceiro.senha_hash && ok) {
+      const s = await createClientSession(parceiro.id, empresa.id);
+      Astro.cookies.set(CLIENT_SESSION_COOKIE, s.token, {
+        httpOnly: true,
+        secure: import.meta.env.PROD,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: s.maxAge,
+      });
+      return Astro.redirect(`/loja/${empCodigo}`);
+    }
+    erro = 'CPF/CNPJ, e-mail ou senha inválidos.';
+  }
+}
+---
+<LojaLayout title="Entrar na Loja" empresa={empresa} bare>
+  <form method="post" class="card" style="max-width:420px;width:100%">
+    <h1>Entrar em {empresa.nome}</h1>
+    <p class="muted" style="margin-top:0;font-size:13px">
+      Para acessar o catálogo de produtos e fazer pedidos, entre com sua conta ou cadastre-se.
+    </p>
+    {erro && <div class="msg err">{erro}</div>}
+    <p>
+      <label for="ident">CPF, CNPJ ou E-mail</label>
+      <input id="ident" name="ident" value={ident} required autofocus />
+    </p>
+    <p>
+      <label for="senha">Senha</label>
+      <input id="senha" name="senha" type="password" required />
+    </p>
+    <button style="width:100%">Entrar na loja</button>
+    <p class="muted" style="text-align:center;margin:10px 0 0">
+      <a href={`/loja/${empCodigo}/recuperar-senha`}>Esqueci minha senha</a>
+    </p>
+    <p class="muted" style="text-align:center;margin:6px 0 0">
+      Ainda não tem cadastro? <a href={`/loja/${empCodigo}/cadastro`}><strong>Cadastre-se para comprar</strong></a>
+    </p>
+  </form>
+</LojaLayout>

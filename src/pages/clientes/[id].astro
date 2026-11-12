@@ -1,6 +1,6 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-import { db } from '../../lib/auth';
+import { db, hashPassword } from '../../lib/auth';
 import { str, onlyDigits, validCPF, validCNPJ, validEmail, UFS } from '../../lib/validate';
 
 const u = Astro.locals.user!;
@@ -44,6 +44,7 @@ if (Astro.request.method === 'POST') {
   else if (p.documento && tipo === 'J' && !validCNPJ(p.documento)) erro = 'CNPJ inválido.';
   else if (p.email && !validEmail(p.email)) erro = 'E-mail inválido.';
   else if (p.uf && !UFS.includes(p.uf)) erro = 'UF inválida.';
+  else if (f.get('senha_loja') && String(f.get('senha_loja')).length < 6) erro = 'A senha da loja do cliente deve ter pelo menos 6 caracteres.';
   else if (p.documento) {
     const dup = await db()
       .prepare('SELECT nome FROM parceiros WHERE empresa_id = ? AND documento = ? AND id <> ?')
@@ -52,15 +53,22 @@ if (Astro.request.method === 'POST') {
   }
 
   if (!erro) {
+    const novaSenhaLoja = String(f.get('senha_loja') ?? '');
     const cols = ['tipo_pessoa','eh_cliente','eh_fornecedor','nome','nome_fantasia','documento','rg_ie','email','telefone','celular','contato',
       'cep','logradouro','numero','complemento','bairro','cidade','uf','observacoes','ativo'];
     const vals = cols.map((c) => (typeof p[c] === 'string' && p[c] === '' ? null : p[c]));
+    let targetId = id;
     if (isNew) {
-      await db().prepare(`INSERT INTO parceiros (empresa_id, ${cols.join(',')}) VALUES (?, ${cols.map(() => '?').join(',')})`)
-        .bind(u.empresaId, ...vals).run();
+      const ins = await db().prepare(`INSERT INTO parceiros (empresa_id, ${cols.join(',')}) VALUES (?, ${cols.map(() => '?').join(',')}) RETURNING id`)
+        .bind(u.empresaId, ...vals).first<{ id: number }>();
+      targetId = ins!.id;
     } else {
       await db().prepare(`UPDATE parceiros SET ${cols.map((c) => `${c} = ?`).join(', ')}, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?`)
         .bind(...vals, id, u.empresaId).run();
+    }
+    if (novaSenhaLoja) {
+      await db().prepare('UPDATE parceiros SET senha_hash = ? WHERE id = ? AND empresa_id = ?')
+        .bind(await hashPassword(novaSenhaLoja), targetId, u.empresaId).run();
     }
     return Astro.redirect('/clientes?ok=salvo');
   }
@@ -69,8 +77,32 @@ const v = (k: string) => p[k] ?? '';
 const pj = p.tipo_pessoa === 'J';
 ---
 <Layout title={isNew ? 'Novo cadastro' : 'Editar cadastro'} active="clientes">
-  <h1>{isNew ? 'Novo cliente / fornecedor' : 'Editar cadastro'}</h1>
+  <div class="row" style="margin-bottom:16px">
+    <h1 style="margin:0">{isNew ? 'Novo cliente / fornecedor' : 'Editar cadastro'}</h1>
+    <span class="spacer"></span>
+    <button type="button" class="btn sec" id="btn-auto">⚡ Cadastro automático</button>
+  </div>
   {erro && <div class="msg err">{erro}</div>}
+  <div id="auto-aviso" class="msg ok" style="display:none"></div>
+
+  <dialog id="dlg-auto" class="modal">
+    <form method="dialog" id="form-auto">
+      <h2>Cadastro automático</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Informe o CPF ou CNPJ para buscar os dados públicos e preencher o formulário automaticamente.
+      </p>
+      <div id="auto-erro" class="msg err" style="display:none"></div>
+      <p>
+        <label for="inp-auto-doc">CPF ou CNPJ *</label>
+        <input id="inp-auto-doc" placeholder="Digite somente números ou com pontuação" inputmode="numeric" autocomplete="off" />
+      </p>
+      <div class="row" style="justify-content:flex-end;margin-top:16px">
+        <button type="button" class="btn sec" id="btn-auto-fechar">Cancelar</button>
+        <button type="submit" id="btn-auto-buscar">Buscar</button>
+      </div>
+    </form>
+  </dialog>
+
   <form method="post" id="form">
     <div class="card">
       <h2>Dados principais</h2>
@@ -96,15 +128,22 @@ const pj = p.tipo_pessoa === 'J';
     <div class="card">
       <h2>Contato</h2>
       <div class="grid">
-        <div class="c6"><label>E-mail</label><input name="email" type="email" value={v('email')} /></div>
+        <div class="c4"><label>E-mail</label><input name="email" type="email" value={v('email')} /></div>
         <div class="c3"><label>Telefone</label><input name="telefone" value={v('telefone')} /></div>
-        <div class="c3"><label>Celular / WhatsApp</label><input name="celular" value={v('celular')} /></div>
+        <div class="c2"><label>Celular / WhatsApp</label><input name="celular" value={v('celular')} /></div>
+        <div class="c3">
+          <label>Senha da Loja Virtual</label>
+          <input name="senha_loja" type="password" minlength="6" autocomplete="new-password" placeholder={p.senha_hash ? 'Deixe vazio p/ manter' : 'Definir senha'} />
+        </div>
       </div>
     </div>
     <div class="card">
-      <h2>Endereço</h2>
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">Endereço</h2>
+        <span id="cep-status" class="muted" style="font-size:13px"></span>
+      </div>
       <div class="grid">
-        <div class="c3"><label>CEP</label><input name="cep" value={v('cep')} inputmode="numeric" /></div>
+        <div class="c3"><label>CEP</label><input name="cep" id="inp-cep" value={v('cep')} inputmode="numeric" maxlength="9" placeholder="00000-000" /></div>
         <div class="c6"><label>Logradouro</label><input name="logradouro" value={v('logradouro')} /></div>
         <div class="c3"><label>Número</label><input name="numero" value={v('numero')} /></div>
         <div class="c4"><label>Complemento</label><input name="complemento" value={v('complemento')} /></div>
@@ -136,4 +175,146 @@ const pj = p.tipo_pessoa === 'J';
     document.getElementById('lbl-rg').textContent = j ? 'Inscrição estadual' : 'RG';
   };
   t.addEventListener('change', set);
+
+  // Cadastro automático via diálogo de CPF/CNPJ
+  const dlg = document.getElementById('dlg-auto');
+  const btnAuto = document.getElementById('btn-auto');
+  const btnFechar = document.getElementById('btn-auto-fechar');
+  const btnBuscar = document.getElementById('btn-auto-buscar');
+  const formAuto = document.getElementById('form-auto');
+  const inpDoc = document.getElementById('inp-auto-doc');
+  const boxErro = document.getElementById('auto-erro');
+  const boxAviso = document.getElementById('auto-aviso');
+  const form = document.getElementById('form');
+
+  function abrirDialogo() {
+    boxErro.style.display = 'none';
+    boxErro.textContent = '';
+    const docAtual = form.querySelector('[name="documento"]')?.value || '';
+    if (docAtual && !inpDoc.value) inpDoc.value = docAtual;
+    dlg.showModal();
+    setTimeout(() => inpDoc.focus(), 50);
+  }
+
+  btnAuto.addEventListener('click', abrirDialogo);
+  btnFechar.addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) dlg.close();
+  });
+
+  if (new URLSearchParams(location.search).get('auto') === '1') {
+    abrirDialogo();
+  }
+
+  formAuto.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    boxErro.style.display = 'none';
+    const doc = (inpDoc.value || '').replace(/\D/g, '');
+    if (doc.length !== 11 && doc.length !== 14) {
+      boxErro.textContent = 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos).';
+      boxErro.style.display = 'block';
+      return;
+    }
+
+    btnBuscar.disabled = true;
+    const txtOriginal = btnBuscar.textContent;
+    btnBuscar.textContent = 'Buscando...';
+
+    try {
+      const res = await fetch('/api/consulta-doc?doc=' + encodeURIComponent(doc));
+      const data = await res.json();
+      if (!res.ok || data.erro) {
+        boxErro.textContent = data.erro || 'Não foi possível consultar o documento.';
+        boxErro.style.display = 'block';
+        return;
+      }
+
+      const d = data.dados || {};
+      if (d.tipo_pessoa) {
+        t.value = d.tipo_pessoa;
+        set();
+      }
+      const campos = [
+        'documento', 'nome', 'nome_fantasia', 'rg_ie', 'contato',
+        'email', 'telefone', 'celular',
+        'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'observacoes'
+      ];
+      campos.forEach((k) => {
+        if (d[k] !== undefined && d[k] !== null && d[k] !== '') {
+          const el = form.querySelector(`[name="${k}"]`);
+          if (el) el.value = d[k];
+        }
+      });
+      if (typeof d.ativo === 'boolean') {
+        const chk = form.querySelector('[name="ativo"]');
+        if (chk) chk.checked = d.ativo;
+      }
+
+      dlg.close();
+      if (data.aviso) {
+        boxAviso.textContent = data.aviso;
+        boxAviso.style.display = 'block';
+      }
+      form.querySelector('[name="nome"]')?.focus();
+    } catch {
+      boxErro.textContent = 'Falha de comunicação ao consultar os dados públicos.';
+      boxErro.style.display = 'block';
+    } finally {
+      btnBuscar.disabled = false;
+      btnBuscar.textContent = txtOriginal;
+    }
+  });
+
+  // Preenchimento automático do endereço ao informar o CEP (consulta Correios)
+  const inpCep = document.getElementById('inp-cep');
+  const cepStatus = document.getElementById('cep-status');
+  let ultimoCepConsultado = (inpCep?.value || '').replace(/\D/g, '');
+
+  async function buscarCep(forcar = false) {
+    const cep = (inpCep?.value || '').replace(/\D/g, '');
+    if (cep.length !== 8) return;
+    if (!forcar && cep === ultimoCepConsultado) return;
+    ultimoCepConsultado = cep;
+
+    if (cepStatus) {
+      cepStatus.style.color = 'var(--mu)';
+      cepStatus.textContent = 'Consultando CEP nos Correios...';
+    }
+    try {
+      const r = await fetch('/api/consulta-cep?cep=' + encodeURIComponent(cep));
+      const data = await r.json();
+      if (!r.ok || data.erro) {
+        if (cepStatus) {
+          cepStatus.style.color = 'var(--dg)';
+          cepStatus.textContent = data.erro || 'CEP não encontrado.';
+        }
+        return;
+      }
+      const end = data.endereco || {};
+      if (end.logradouro !== undefined) form.querySelector('[name="logradouro"]').value = end.logradouro;
+      if (end.bairro !== undefined) form.querySelector('[name="bairro"]').value = end.bairro;
+      if (end.cidade !== undefined) form.querySelector('[name="cidade"]').value = end.cidade;
+      if (end.uf) form.querySelector('[name="uf"]').value = end.uf;
+      const compEl = form.querySelector('[name="complemento"]');
+      if (end.complemento && compEl && !compEl.value.trim()) compEl.value = end.complemento;
+
+      if (cepStatus) {
+        cepStatus.style.color = 'var(--ok)';
+        cepStatus.textContent = '✓ Endereço carregado dos Correios';
+      }
+      form.querySelector('[name="numero"]')?.focus();
+    } catch {
+      if (cepStatus) {
+        cepStatus.style.color = 'var(--dg)';
+        cepStatus.textContent = 'Não foi possível consultar o CEP no momento.';
+      }
+    }
+  }
+
+  inpCep?.addEventListener('input', () => {
+    const d = (inpCep.value || '').replace(/\D/g, '');
+    if (d.length === 8) buscarCep(false);
+    else if (cepStatus) cepStatus.textContent = '';
+  });
+  inpCep?.addEventListener('blur', () => buscarCep(false));
 </script>

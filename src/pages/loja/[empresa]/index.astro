@@ -1,0 +1,272 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE } from '../../../lib/auth';
+import { formatMoney, formatQty, parseNum } from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
+const cliente = token ? await getSessionClient(token, empCodigo) : null;
+if (!cliente) {
+  return Astro.redirect(`/loja/${empCodigo}/login`);
+}
+
+let msgOk = '';
+let msgErro = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const produtoId = Number(f.get('produto_id')) || 0;
+  const qtd = Math.max(1, parseNum(f.get('quantidade'), 1));
+
+  const prod = await db()
+    .prepare('SELECT id, nome, estoque_atual FROM produtos WHERE id = ? AND empresa_id = ? AND ativo = 1 AND estoque_atual >= 1')
+    .bind(produtoId, empresa.id)
+    .first<{ id: number; nome: string; estoque_atual: number }>();
+
+  if (!prod) {
+    msgErro = 'Este produto não está mais disponível em estoque.';
+  } else {
+    const noCarrinho = await db()
+      .prepare('SELECT quantidade FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ? AND produto_id = ?')
+      .bind(empresa.id, cliente.id, prod.id)
+      .first<{ quantidade: number }>();
+
+    const novaQtd = Math.min(prod.estoque_atual, Number(noCarrinho?.quantidade ?? 0) + qtd);
+
+    await db()
+      .prepare(
+        `INSERT INTO loja_carrinho (empresa_id, parceiro_id, produto_id, quantidade)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (empresa_id, parceiro_id, produto_id)
+         DO UPDATE SET quantidade = excluded.quantidade`,
+      )
+      .bind(empresa.id, cliente.id, prod.id, novaQtd)
+      .run();
+
+    msgOk = `"${prod.nome}" foi adicionado ao seu carrinho!`;
+  }
+}
+
+const sp = Astro.url.searchParams;
+const cat = (sp.get('cat') ?? '').trim();
+const q = (sp.get('q') ?? '').trim().slice(0, 80);
+
+// Categorias que possuem ao menos 1 produto ativo com estoque >= 1
+const { results: categoriasRows } = await db()
+  .prepare(
+    `SELECT COALESCE(NULLIF(TRIM(categoria), ''), 'Geral') AS categoria, COUNT(*) AS qtd
+       FROM produtos
+      WHERE empresa_id = ? AND ativo = 1 AND estoque_atual >= 1
+      GROUP BY COALESCE(NULLIF(TRIM(categoria), ''), 'Geral')
+      ORDER BY categoria COLLATE NOCASE`,
+  )
+  .bind(empresa.id)
+  .all<{ categoria: string; qtd: number }>();
+
+const where = ['empresa_id = ?', 'ativo = 1', 'estoque_atual >= 1'];
+const args: unknown[] = [empresa.id];
+
+if (cat) {
+  if (cat === 'Geral') {
+    where.push("(categoria IS NULL OR TRIM(categoria) = '' OR categoria = 'Geral')");
+  } else {
+    where.push('categoria = ?');
+    args.push(cat);
+  }
+}
+if (q) {
+  where.push('(nome LIKE ? OR descricao LIKE ? OR marca LIKE ? OR codigo LIKE ?)');
+  args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+}
+
+const { results: produtos } = await db()
+  .prepare(
+    `SELECT id, codigo, nome, descricao, categoria, marca, unidade, preco_venda, estoque_atual, foto
+       FROM produtos
+      WHERE ${where.join(' AND ')}
+      ORDER BY nome COLLATE NOCASE`,
+  )
+  .bind(...args)
+  .all<{
+    id: number;
+    codigo: string | null;
+    nome: string;
+    descricao: string | null;
+    categoria: string | null;
+    marca: string | null;
+    unidade: string;
+    preco_venda: number;
+    estoque_atual: number;
+    foto: string | null;
+  }>();
+
+const countCart = await db()
+  .prepare('SELECT COALESCE(SUM(quantidade), 0) AS n FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ?')
+  .bind(empresa.id, cliente.id)
+  .first<{ n: number }>();
+
+const baseUrl = `/loja/${empCodigo}`;
+---
+<LojaLayout title="Catálogo de Produtos" empresa={empresa} cliente={cliente} qtdCarrinho={Number(countCart?.n ?? 0)}>
+  {msgOk && (
+    <div class="msg ok row">
+      <span>{msgOk}</span>
+      <span class="spacer"></span>
+      <a href={`${baseUrl}/carrinho`} style="font-weight:700">Ver carrinho →</a>
+    </div>
+  )}
+  {msgErro && <div class="msg err">{msgErro}</div>}
+
+  <div class="row" style="margin-bottom:14px">
+    <h1 style="margin:0">Produtos disponíveis</h1>
+    <span class="spacer"></span>
+    <form method="get" class="row" style="margin:0">
+      {cat && <input type="hidden" name="cat" value={cat} />}
+      <input name="q" value={q} placeholder="Buscar produto ou marca..." style="width:240px" />
+      <button>Buscar</button>
+      {(q || cat) && <a class="btn sec" href={baseUrl}>Limpar</a>}
+    </form>
+  </div>
+
+  <div class="cat-pills">
+    <a href={baseUrl} class={`cat-pill ${!cat ? 'on' : ''}`}>Todas as categorias </a>
+    {categoriasRows.map((c) => (
+      <a
+        href={`${baseUrl}?cat=${encodeURIComponent(c.categoria)}`}
+        class={`cat-pill ${cat === c.categoria ? 'on' : ''}`}
+      >
+        {c.categoria} ({c.qtd})
+      </a>
+    ))}
+  </div>
+
+  {produtos.length === 0 ? (
+    <div class="card muted">Nenhum produto disponível em estoque para esta seleção no momento.</div>
+  ) : (
+    <div class="prod-grid">
+      {produtos.map((p) => (
+        <div
+          class="prod-mini"
+          tabindex="0"
+          role="button"
+          data-id={p.id}
+          data-codigo={p.codigo || ''}
+          data-nome={p.nome}
+          data-desc={p.descricao || ''}
+          data-cat={[p.categoria || 'Geral', p.marca].filter(Boolean).join(' · ')}
+          data-preco={formatMoney(p.preco_venda)}
+          data-est={p.estoque_atual}
+          data-est-fmt={`${formatQty(p.estoque_atual)} ${p.unidade}`}
+          data-foto={p.foto || ''}
+          title="Clique para expandir e adicionar ao carrinho"
+        >
+          <div class="prod-mini-icon">
+            {p.foto ? <img src={p.foto} alt={p.nome} loading="lazy" /> : <span>📦</span>}
+          </div>
+          <div class="prod-mini-title">{p.nome}</div>
+          <div class="prod-price">{formatMoney(p.preco_venda)}</div>
+          <div class="muted" style="font-size:11px">
+            Quantidade disponível: <strong>{formatQty(p.estoque_atual)} {p.unidade}</strong>
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+
+  <dialog id="dlg-prod" class="modal" style="max-width:480px">
+    <form method="post" id="form-add-cart">
+      <input type="hidden" name="produto_id" id="m-id" />
+      <div class="row" style="align-items:flex-start;gap:14px;margin-bottom:12px">
+        <div
+          id="m-icon-box"
+          style="width:110px;height:110px;border-radius:10px;border:1px solid var(--bd);background:#f8fafc;display:grid;place-items:center;overflow:hidden;font-size:40px;flex-shrink:0"
+        >
+          <img id="m-foto" src="" alt="" style="width:100%;height:100%;object-fit:cover;display:none" />
+          <span id="m-placeholder">📦</span>
+        </div>
+        <div style="flex:1;min-width:180px">
+          <div id="m-cat" class="muted" style="font-size:12px"></div>
+          <h2 id="m-nome" style="margin:2px 0 6px;font-size:19px"></h2>
+          <div id="m-preco" style="font-size:22px;font-weight:700;color:var(--pr)"></div>
+          <div class="muted" style="font-size:12px;margin-top:4px">
+            Quantidade disponível: <strong id="m-est"></strong>
+          </div>
+        </div>
+      </div>
+
+      <p id="m-desc" class="muted" style="font-size:14px;margin:0 0 14px;display:none"></p>
+
+      <div class="row" style="padding-top:12px;border-top:1px solid var(--bd)">
+        <div style="width:110px">
+          <label for="m-qtd">Quantidade</label>
+          <input id="m-qtd" name="quantidade" type="number" min="1" step="1" value="1" required />
+        </div>
+        <span class="spacer"></span>
+        <div class="row" style="margin-top:18px">
+          <button type="button" class="btn sec" id="btn-fechar-prod">Fechar</button>
+          <button type="submit">🛒 Colocar no carrinho</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+</LojaLayout>
+
+<script is:inline>
+  const dlg = document.getElementById('dlg-prod');
+  const btnFechar = document.getElementById('btn-fechar-prod');
+  const mId = document.getElementById('m-id');
+  const mFoto = document.getElementById('m-foto');
+  const mPlaceholder = document.getElementById('m-placeholder');
+  const mCat = document.getElementById('m-cat');
+  const mNome = document.getElementById('m-nome');
+  const mPreco = document.getElementById('m-preco');
+  const mEst = document.getElementById('m-est');
+  const mDesc = document.getElementById('m-desc');
+  const mQtd = document.getElementById('m-qtd');
+
+  function abrirProduto(card) {
+    const d = card.dataset;
+    mId.value = d.id;
+    mCat.textContent = d.codigo ? `${d.cat} · Cód. ${d.codigo}` : d.cat;
+    mNome.textContent = d.nome;
+    mPreco.textContent = d.preco;
+    mEst.textContent = d.estFmt;
+    if (d.desc) {
+      mDesc.textContent = d.desc;
+      mDesc.style.display = 'block';
+    } else {
+      mDesc.style.display = 'none';
+    }
+    if (d.foto) {
+      mFoto.src = d.foto;
+      mFoto.alt = d.nome;
+      mFoto.style.display = 'block';
+      mPlaceholder.style.display = 'none';
+    } else {
+      mFoto.style.display = 'none';
+      mPlaceholder.style.display = 'block';
+    }
+    mQtd.max = d.est;
+    mQtd.value = '1';
+    dlg.showModal();
+    setTimeout(() => mQtd.focus(), 40);
+  }
+
+  document.querySelectorAll('.prod-mini').forEach((card) => {
+    card.addEventListener('click', () => abrirProduto(card));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        abrirProduto(card);
+      }
+    });
+  });
+
+  btnFechar?.addEventListener('click', () => dlg.close());
+  dlg?.addEventListener('click', (e) => {
+    if (e.target === dlg) dlg.close();
+  });
+</script>

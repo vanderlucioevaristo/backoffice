@@ -1,0 +1,74 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import { db, getLojaEmpresa, hashPassword } from '../../../lib/auth';
+import { onlyDigits, str } from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+let erro = '';
+let ok = false;
+let documento = '';
+let email = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  documento = onlyDigits(str(f, 'documento', 30));
+  email = str(f, 'email', 120).toLowerCase();
+  const nova = String(f.get('nova_senha') ?? '');
+  const conf = String(f.get('confirmar_senha') ?? '');
+
+  if (!documento || !email) {
+    erro = 'Informe seu CPF/CNPJ e seu e-mail cadastrado.';
+  } else if (nova.length < 6) {
+    erro = 'A nova senha deve ter pelo menos 6 caracteres.';
+  } else if (nova !== conf) {
+    erro = 'A confirmação de senha não confere.';
+  } else {
+    const parceiro = await db()
+      .prepare(
+        `SELECT id FROM parceiros
+          WHERE empresa_id = ? AND eh_cliente = 1 AND ativo = 1
+            AND documento = ? AND lower(email) = ?`,
+      )
+      .bind(empresa.id, documento, email)
+      .first<{ id: number }>();
+
+    if (!parceiro) {
+      erro = 'CPF/CNPJ e e-mail não conferem com nenhum cadastro ativo nesta loja.';
+    } else {
+      await db()
+        .prepare("UPDATE parceiros SET senha_hash = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+        .bind(await hashPassword(nova), parceiro.id, empresa.id)
+        .run();
+      await db().prepare('DELETE FROM sessoes_clientes WHERE parceiro_id = ? AND empresa_id = ?').bind(parceiro.id, empresa.id).run();
+      ok = true;
+    }
+  }
+}
+---
+<LojaLayout title="Recuperar senha" empresa={empresa} bare>
+  <form method="post" class="card" style="max-width:440px;width:100%">
+    <h1>Recuperar senha</h1>
+    <p class="muted" style="margin-top:0;font-size:13px">
+      Confirme seu CPF/CNPJ e o e-mail informado no cadastro para definir uma nova senha.
+    </p>
+    {erro && <div class="msg err">{erro}</div>}
+    {ok ? (
+      <div>
+        <div class="msg ok">Sua senha foi redefinida com sucesso!</div>
+        <a class="btn" href={`/loja/${empCodigo}/login`} style="width:100%;text-align:center">Ir para o Login da Loja</a>
+      </div>
+    ) : (
+      <>
+        <p><label>CPF ou CNPJ *</label><input name="documento" value={documento} required inputmode="numeric" autofocus /></p>
+        <p><label>E-mail cadastrado *</label><input name="email" type="email" value={email} required /></p>
+        <p><label>Nova senha * (mín. 6 caracteres)</label><input name="nova_senha" type="password" minlength="6" required autocomplete="new-password" /></p>
+        <p><label>Confirmar nova senha *</label><input name="confirmar_senha" type="password" minlength="6" required autocomplete="new-password" /></p>
+        <button style="width:100%">Redefinir senha</button>
+        <p class="muted" style="text-align:center;margin-bottom:0"><a href={`/loja/${empCodigo}/login`}>← Voltar para o login</a></p>
+      </>
+    )}
+  </form>
+</LojaLayout>

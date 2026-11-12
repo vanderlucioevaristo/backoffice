@@ -34,3 +34,5 @@ th { background:#f9fafb; color:var(--mu); font-weight:600; } tr:last-child td { 
 .msg { padding:10px 12px; border-radius:6px; margin-bottom:12px; font-size:14px; }
 .msg.err { background:#fee2e2; color:#991b1b; } .msg.ok { background:#dcfce7; color:#166534; }
 .muted { color:var(--mu); } .pager { margin-top:12px; }
+dialog.modal { border:1px solid var(--bd); border-radius:10px; padding:20px; width:100%; max-width:440px; box-shadow:0 12px 32px rgba(0,0,0,.18); }
+dialog.modal::backdrop { background:rgba(17,24,39,.55); }

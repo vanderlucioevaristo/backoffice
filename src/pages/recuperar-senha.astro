@@ -1,0 +1,83 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db, hashPassword } from '../lib/auth';
+import { onlyDigits, str } from '../lib/validate';
+
+if (Astro.locals.user) return Astro.redirect('/');
+
+let erro = '';
+let ok = false;
+let empresa = '';
+let login = '';
+let verificador = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  empresa = str(f, 'empresa', 40).toLowerCase();
+  login = str(f, 'login', 40).toLowerCase();
+  verificador = str(f, 'verificador', 120);
+  const nova = String(f.get('nova_senha') ?? '');
+  const conf = String(f.get('confirmar_senha') ?? '');
+
+  if (!empresa || !login || !verificador) {
+    erro = 'Preencha todos os campos de identificação.';
+  } else if (nova.length < 8) {
+    erro = 'A nova senha deve ter pelo menos 8 caracteres.';
+  } else if (nova !== conf) {
+    erro = 'A confirmação de senha não confere.';
+  } else {
+    const row = await db()
+      .prepare(
+        `SELECT u.id, u.empresa_id, u.email, u.cpf, e.cnpj AS empresa_cnpj
+           FROM usuarios u
+           JOIN empresas e ON e.id = u.empresa_id
+          WHERE e.codigo = ? AND u.login = ? AND u.ativo = 1 AND e.ativa = 1`,
+      )
+      .bind(empresa, login)
+      .first<{ id: number; empresa_id: number; email: string | null; cpf: string | null; empresa_cnpj: string | null }>();
+
+    const verDigits = onlyDigits(verificador);
+    const verLower = verificador.toLowerCase();
+
+    const bateEmail = !!(row?.email && row.email.toLowerCase() === verLower);
+    const bateCpf = !!(row?.cpf && verDigits.length === 11 && row.cpf === verDigits);
+    const bateCnpj = !!(row?.empresa_cnpj && verDigits.length === 14 && row.empresa_cnpj === verDigits);
+
+    if (!row || (!bateEmail && !bateCpf && !bateCnpj)) {
+      erro = 'Dados de verificação não conferem com o cadastro. Se não tiver e-mail ou CPF cadastrado, solicite a redefinição ao Administrador da sua empresa.';
+    } else {
+      await db()
+        .prepare("UPDATE usuarios SET senha_hash = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+        .bind(await hashPassword(nova), row.id, row.empresa_id)
+        .run();
+      await db().prepare('DELETE FROM sessoes WHERE usuario_id = ? AND empresa_id = ?').bind(row.id, row.empresa_id).run();
+      ok = true;
+    }
+  }
+}
+---
+<Layout title="Recuperar senha" bare>
+  <form method="post" class="card" style="max-width:440px">
+    <h1>Recuperar senha</h1>
+    <p class="muted" style="margin-top:0;font-size:13px">
+      Informe o código da empresa, seu usuário e um dado cadastrado (seu E-mail, seu CPF ou o CNPJ da empresa) para definir uma nova senha.
+    </p>
+    {erro && <div class="msg err">{erro}</div>}
+    {ok ? (
+      <div>
+        <div class="msg ok">Sua senha foi redefinida com sucesso!</div>
+        <a class="btn" href="/login" style="width:100%;text-align:center">Ir para o Login</a>
+      </div>
+    ) : (
+      <>
+        <p><label>Empresa (código) *</label><input name="empresa" value={empresa} required autofocus /></p>
+        <p><label>Usuário (login) *</label><input name="login" value={login} required /></p>
+        <p><label>Seu E-mail, seu CPF ou CNPJ da empresa *</label><input name="verificador" value={verificador} required placeholder="Informe um dos dados do seu cadastro" /></p>
+        <p><label>Nova senha * (mín. 8 caracteres)</label><input name="nova_senha" type="password" minlength="8" required autocomplete="new-password" /></p>
+        <p><label>Confirmar nova senha *</label><input name="confirmar_senha" type="password" minlength="8" required autocomplete="new-password" /></p>
+        <button style="width:100%">Redefinir senha</button>
+        <p class="muted" style="text-align:center;margin-bottom:0"><a href="/login">← Voltar para o login</a></p>
+      </>
+    )}
+  </form>
+</Layout>

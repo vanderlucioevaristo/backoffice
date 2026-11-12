@@ -1,7 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { getSessionUser, SESSION_COOKIE } from './lib/auth';
 
-const PUBLIC = ['/login', '/cadastro-empresa'];
+const PUBLIC = ['/login', '/cadastro-empresa', '/recuperar-senha'];
 
 export const onRequest = defineMiddleware(async (ctx, next) => {
   const path = ctx.url.pathname;
@@ -9,7 +9,10 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   const user = token ? await getSessionUser(token) : null;
   ctx.locals.user = user;
 
-  if (!user && !PUBLIC.includes(path)) {
+  // As páginas da loja virtual (/loja/...) e a consulta de CEP têm controle próprio de acesso do cliente
+  const isLojaPublic = path.startsWith('/loja/') || path === '/api/consulta-cep' || path === '/api/consulta-doc';
+
+  if (!user && !PUBLIC.includes(path) && !isLojaPublic) {
     if (token) ctx.cookies.delete(SESSION_COOKIE, { path: '/' });
     return ctx.redirect('/login');
   }

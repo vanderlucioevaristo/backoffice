@@ -1,0 +1,255 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatDoc, formatMoney, formatQty } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/pedidos');
+
+let erro = '';
+
+let pedido = await db()
+  .prepare(
+    `SELECT p.*,
+            c.nome AS cliente_nome, c.documento AS cliente_doc, c.email AS cliente_email,
+            c.telefone AS cliente_telefone, c.celular AS cliente_celular,
+            c.cep, c.logradouro, c.numero, c.complemento, c.bairro, c.cidade, c.uf
+       FROM loja_pedidos p
+       JOIN parceiros c ON c.id = p.parceiro_id AND c.empresa_id = p.empresa_id
+      WHERE p.id = ? AND p.empresa_id = ?`,
+  )
+  .bind(id, u.empresaId)
+  .first<any>();
+
+if (!pedido) return Astro.redirect('/pedidos');
+
+const { results: itens } = await db()
+  .prepare(
+    `SELECT i.*, pr.codigo, pr.nome AS produto_nome, pr.unidade, pr.foto, pr.estoque_atual, pr.preco_custo
+       FROM loja_pedidos_itens i
+       JOIN produtos pr ON pr.id = i.produto_id AND pr.empresa_id = i.empresa_id
+      WHERE i.pedido_id = ? AND i.empresa_id = ?
+      ORDER BY i.id ASC`,
+  )
+  .bind(id, u.empresaId)
+  .all<any>();
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const novoStatus = String(f.get('status') ?? '');
+
+  if (['novo', 'separacao', 'entregue', 'cancelado'].includes(novoStatus) && novoStatus !== pedido.status) {
+    // Se estava ativo e foi cancelado -> devolve as quantidades ao estoque
+    if (pedido.status !== 'cancelado' && novoStatus === 'cancelado') {
+      for (const it of itens) {
+        const pr = await db()
+          .prepare('SELECT estoque_atual FROM produtos WHERE id = ? AND empresa_id = ?')
+          .bind(it.produto_id, u.empresaId)
+          .first<{ estoque_atual: number }>();
+        const saldoAnt = Number(pr?.estoque_atual ?? 0);
+        const saldoPost = saldoAnt + Number(it.quantidade);
+
+        await db()
+          .prepare("UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+          .bind(saldoPost, it.produto_id, u.empresaId)
+          .run();
+
+        await db()
+          .prepare(
+            `INSERT INTO estoque_movimentacoes
+               (empresa_id, produto_id, tipo, origem, referencia_id, quantidade, saldo_anterior, saldo_posterior, custo_unitario, observacao, usuario_id)
+             VALUES (?, ?, 'E', 'CANCEL_PEDIDO', ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            u.empresaId,
+            it.produto_id,
+            id,
+            Number(it.quantidade),
+            saldoAnt,
+            saldoPost,
+            it.preco_custo,
+            `Estorno p/ estoque — Cancelamento do Pedido #${id}`,
+            u.id,
+          )
+          .run();
+      }
+    }
+
+    // Se estava cancelado e voltou a ficar ativo -> verifica estoque e baixa novamente
+    if (pedido.status === 'cancelado' && novoStatus !== 'cancelado') {
+      for (const it of itens) {
+        const pr = await db()
+          .prepare('SELECT nome, estoque_atual FROM produtos WHERE id = ? AND empresa_id = ?')
+          .bind(it.produto_id, u.empresaId)
+          .first<{ nome: string; estoque_atual: number }>();
+        if (!pr || pr.estoque_atual < it.quantidade) {
+          erro = `Estoque insuficiente para reativar o item "${it.produto_nome}".`;
+          break;
+        }
+      }
+      if (!erro) {
+        for (const it of itens) {
+          const pr = await db()
+            .prepare('SELECT estoque_atual FROM produtos WHERE id = ? AND empresa_id = ?')
+            .bind(it.produto_id, u.empresaId)
+            .first<{ estoque_atual: number }>();
+          const saldoAnt = Number(pr?.estoque_atual ?? 0);
+          const saldoPost = saldoAnt - Number(it.quantidade);
+
+          await db()
+            .prepare("UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+            .bind(saldoPost, it.produto_id, u.empresaId)
+            .run();
+
+          await db()
+            .prepare(
+              `INSERT INTO estoque_movimentacoes
+                 (empresa_id, produto_id, tipo, origem, referencia_id, quantidade, saldo_anterior, saldo_posterior, custo_unitario, observacao, usuario_id)
+               VALUES (?, ?, 'S', 'VENDA', ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              u.empresaId,
+              it.produto_id,
+              id,
+              -Number(it.quantidade),
+              saldoAnt,
+              saldoPost,
+              it.preco_custo,
+              `Reativação do Pedido #${id}`,
+              u.id,
+            )
+            .run();
+        }
+      }
+    }
+
+    if (!erro) {
+      await db()
+        .prepare("UPDATE loja_pedidos SET status = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+        .bind(novoStatus, id, u.empresaId)
+        .run();
+      return Astro.redirect('/pedidos?ok=status');
+    }
+  }
+}
+
+const enderecoCompleto = [
+  [pedido.logradouro, pedido.numero].filter(Boolean).join(', '),
+  pedido.complemento,
+  pedido.bairro,
+  [pedido.cidade, pedido.uf].filter(Boolean).join('/'),
+  pedido.cep ? `CEP ${pedido.cep}` : '',
+]
+  .filter(Boolean)
+  .join(' · ');
+
+const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
+---
+<Layout title={`Pedido #${pedido.id}`} active="pedidos">
+  <div class="row">
+    <h1>Pedido #{pedido.id}</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/pedidos">← Voltar para pedidos</a>
+  </div>
+  {erro && <div class="msg err">{erro}</div>}
+
+  <div class="grid">
+    <div class="card c8">
+      <h2>Dados do Cliente</h2>
+      <div class="grid">
+        <div class="c6">
+          <label>Cliente</label>
+          <div>
+            <a href={`/clientes/${pedido.parceiro_id}`}><strong>{pedido.cliente_nome}</strong></a>
+            {pedido.cliente_doc && <span class="muted"> ({formatDoc(pedido.cliente_doc)})</span>}
+          </div>
+        </div>
+        <div class="c6">
+          <label>Contato</label>
+          <div>{[pedido.cliente_celular, pedido.cliente_telefone, pedido.cliente_email].filter(Boolean).join(' · ') || '—'}</div>
+        </div>
+        <div class="c12">
+          <label>Endereço cadastrado</label>
+          <div>{enderecoCompleto || '—'}</div>
+        </div>
+        {pedido.observacoes && (
+          <div class="c12">
+            <label>Observações do pedido</label>
+            <div>{pedido.observacoes}</div>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <div class="card c4">
+      <h2>Situação do Pedido</h2>
+      <p class="muted" style="margin:0 0 8px;font-size:13px">
+        Realizado em <strong>{pedido.criado_em}</strong> ({pedido.origem === 'INTERNO' ? 'Balcão / Interno' : 'Loja Virtual'})
+      </p>
+      <form method="post">
+        <p style="margin:0 0 10px">
+          <label>Alterar situação</label>
+          <select name="status">
+            <option value="novo" selected={pedido.status === 'novo'}>Novo / Aguardando</option>
+            <option value="separacao" selected={pedido.status === 'separacao'}>Em separação</option>
+            <option value="entregue" selected={pedido.status === 'entregue'}>Faturado / Entregue</option>
+            <option value="cancelado" selected={pedido.status === 'cancelado'}>Cancelado (estorna estoque)</option>
+          </select>
+        </p>
+        <button style="width:100%">Atualizar situação</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Produtos do Pedido</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Produto</th>
+            <th>Quantidade</th>
+            <th>Preço unitário</th>
+            <th>Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {itens.map((it) => (
+            <tr>
+              <td class="muted">{it.codigo || '—'}</td>
+              <td>
+                <div class="row" style="gap:10px;flex-wrap:nowrap">
+                  {it.foto && (
+                    <img
+                      src={it.foto}
+                      alt={it.produto_nome}
+                      style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--bd);flex-shrink:0"
+                    />
+                  )}
+                  <a href={`/produtos/${it.produto_id}`}>{it.produto_nome}</a>
+                </div>
+              </td>
+              <td><strong>{formatQty(it.quantidade)}</strong> <span class="muted">{it.unidade}</span></td>
+              <td>{formatMoney(it.preco_unitario)}</td>
+              <td><strong>{formatMoney(it.subtotal)}</strong></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="row" style="justify-content:flex-end;margin-top:14px;gap:24px">
+      {Number(pedido.valor_desconto) > 0 && (
+        <div>
+          <span class="muted">Subtotal:</span> {formatMoney(somaItens)} ·
+          <span class="muted">Desconto:</span> −{formatMoney(pedido.valor_desconto)}
+        </div>
+      )}
+      <div style="font-size:18px">
+        <span class="muted">Total do Pedido:</span> <strong>{formatMoney(pedido.valor_total)}</strong>
+      </div>
+    </div>
+  </div>
+</Layout>

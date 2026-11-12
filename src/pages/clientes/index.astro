@@ -38,7 +38,12 @@ const link = (p: number) => { const n = new URLSearchParams(sp); n.set('p', Stri
 const ok = sp.get('ok');
 ---
 <Layout title="Clientes e Fornecedores" active="clientes">
-  <div class="row"><h1>Clientes e Fornecedores</h1><span class="spacer"></span><a class="btn" href="/clientes/novo">+ Novo</a></div>
+  <div class="row">
+    <h1>Clientes e Fornecedores</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/clientes/novo?auto=1">⚡ Cadastro automático</a>
+    <a class="btn" href="/clientes/novo">+ Novo</a>
+  </div>
   {ok === 'salvo' && <div class="msg ok">Cadastro salvo.</div>}
   {ok === 'excluido' && <div class="msg ok">Cadastro excluído.</div>}
   <form class="card row" method="get">

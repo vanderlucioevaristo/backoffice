@@ -1,0 +1,256 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE } from '../../../lib/auth';
+import { formatMoney, formatQty, parseNum, str } from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
+const cliente = token ? await getSessionClient(token, empCodigo) : null;
+if (!cliente) {
+  return Astro.redirect(`/loja/${empCodigo}/login`);
+}
+
+let erro = '';
+let pedidoConcluidoId = 0;
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? '');
+
+  if (acao === 'remover') {
+    const pid = Number(f.get('produto_id')) || 0;
+    await db()
+      .prepare('DELETE FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ? AND produto_id = ?')
+      .bind(empresa.id, cliente.id, pid)
+      .run();
+  } else if (acao === 'atualizar') {
+    const pid = Number(f.get('produto_id')) || 0;
+    const qtd = parseNum(f.get('quantidade'), 0);
+    if (qtd <= 0) {
+      await db()
+        .prepare('DELETE FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ? AND produto_id = ?')
+        .bind(empresa.id, cliente.id, pid)
+        .run();
+    } else {
+      const pr = await db()
+        .prepare('SELECT estoque_atual FROM produtos WHERE id = ? AND empresa_id = ? AND ativo = 1')
+        .bind(pid, empresa.id)
+        .first<{ estoque_atual: number }>();
+      const maxQtd = Math.min(qtd, Number(pr?.estoque_atual ?? 0));
+      if (maxQtd >= 1) {
+        await db()
+          .prepare('UPDATE loja_carrinho SET quantidade = ? WHERE empresa_id = ? AND parceiro_id = ? AND produto_id = ?')
+          .bind(maxQtd, empresa.id, cliente.id, pid)
+          .run();
+      }
+    }
+  } else if (acao === 'finalizar') {
+    const obs = str(f, 'observacoes', 1000);
+    const { results: cartItens } = await db()
+      .prepare(
+        `SELECT c.produto_id, c.quantidade, p.nome, p.preco_venda, p.preco_custo, p.estoque_atual
+           FROM loja_carrinho c
+           JOIN produtos p ON p.id = c.produto_id AND p.empresa_id = c.empresa_id
+          WHERE c.empresa_id = ? AND c.parceiro_id = ?`,
+      )
+      .bind(empresa.id, cliente.id)
+      .all<{
+        produto_id: number;
+        quantidade: number;
+        nome: string;
+        preco_venda: number;
+        preco_custo: number;
+        estoque_atual: number;
+      }>();
+
+    if (cartItens.length === 0) {
+      erro = 'Seu carrinho está vazio.';
+    } else {
+      for (const it of cartItens) {
+        if (it.estoque_atual < 1 || it.quantidade > it.estoque_atual) {
+          erro = `Estoque insuficiente para o produto "${it.nome}" (disponível: ${formatQty(it.estoque_atual)}).`;
+          break;
+        }
+      }
+    }
+
+    if (!erro) {
+      const valorTotal = cartItens.reduce((acc, it) => acc + it.quantidade * it.preco_venda, 0);
+      const ped = await db()
+        .prepare('INSERT INTO loja_pedidos (empresa_id, parceiro_id, valor_total, observacoes) VALUES (?, ?, ?, ?) RETURNING id')
+        .bind(empresa.id, cliente.id, valorTotal, obs || null)
+        .first<{ id: number }>();
+
+      pedidoConcluidoId = ped!.id;
+
+      for (const it of cartItens) {
+        const sub = it.quantidade * it.preco_venda;
+        await db()
+          .prepare(
+            `INSERT INTO loja_pedidos_itens (empresa_id, pedido_id, produto_id, quantidade, preco_unitario, subtotal)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(empresa.id, pedidoConcluidoId, it.produto_id, it.quantidade, it.preco_venda, sub)
+          .run();
+
+        const saldoAnt = Number(it.estoque_atual);
+        const saldoPost = saldoAnt - Number(it.quantidade);
+
+        await db()
+          .prepare("UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
+          .bind(saldoPost, it.produto_id, empresa.id)
+          .run();
+
+        await db()
+          .prepare(
+            `INSERT INTO estoque_movimentacoes
+               (empresa_id, produto_id, tipo, origem, referencia_id, quantidade, saldo_anterior, saldo_posterior, custo_unitario, observacao)
+             VALUES (?, ?, 'S', 'VENDA', ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            empresa.id,
+            it.produto_id,
+            pedidoConcluidoId,
+            -Number(it.quantidade),
+            saldoAnt,
+            saldoPost,
+            it.preco_custo,
+            `Venda Loja Virtual - Pedido #${pedidoConcluidoId} (${cliente.nome})`,
+          )
+          .run();
+      }
+
+      await db()
+        .prepare('DELETE FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ?')
+        .bind(empresa.id, cliente.id)
+        .run();
+    }
+  }
+}
+
+const { results: itens } = await db()
+  .prepare(
+    `SELECT c.produto_id, c.quantidade, p.nome, p.unidade, p.preco_venda, p.estoque_atual, p.foto
+       FROM loja_carrinho c
+       JOIN produtos p ON p.id = c.produto_id AND p.empresa_id = c.empresa_id
+      WHERE c.empresa_id = ? AND c.parceiro_id = ?
+      ORDER BY c.id ASC`,
+  )
+  .bind(empresa.id, cliente.id)
+  .all<{
+    produto_id: number;
+    quantidade: number;
+    nome: string;
+    unidade: string;
+    preco_venda: number;
+    estoque_atual: number;
+    foto: string | null;
+  }>();
+
+const totalCarrinho = itens.reduce((acc, it) => acc + it.quantidade * it.preco_venda, 0);
+const qtdTotal = itens.reduce((acc, it) => acc + Number(it.quantidade), 0);
+const baseUrl = `/loja/${empCodigo}`;
+---
+<LojaLayout title="Meu Carrinho" empresa={empresa} cliente={cliente} qtdCarrinho={qtdTotal}>
+  <div class="row">
+    <h1>Meu Carrinho</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href={baseUrl}>← Continuar comprando</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+
+  {pedidoConcluidoId > 0 ? (
+    <div class="card">
+      <h2 style="color:var(--ok)">✓ Pedido #{pedidoConcluidoId} realizado com sucesso!</h2>
+      <p>Obrigado pela sua compra, <strong>{cliente.nome}</strong>. Seu pedido foi registrado e o estoque reservado.</p>
+      <a class="btn" href={baseUrl}>Voltar à loja</a>
+    </div>
+  ) : itens.length === 0 ? (
+    <div class="card muted">
+      Seu carrinho está vazio. <a href={baseUrl}>Navegue pelas categorias de produtos</a> para adicionar itens.
+    </div>
+  ) : (
+    <>
+      <div class="tbl-wrap" style="margin-bottom:16px">
+        <table>
+          <thead>
+            <tr>
+              <th>Produto</th>
+              <th>Preço unitário</th>
+              <th style="width:210px">Quantidade</th>
+              <th>Subtotal</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {itens.map((it) => (
+              <tr>
+                <td>
+                  <div class="row" style="gap:10px;flex-wrap:nowrap">
+                    {it.foto && (
+                      <img
+                        src={it.foto}
+                        alt={it.nome}
+                        style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--bd);flex-shrink:0"
+                      />
+                    )}
+                    <div>
+                      <strong>{it.nome}</strong>
+                      <div class="muted" style="font-size:12px">Disponível: {formatQty(it.estoque_atual)} {it.unidade}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>{formatMoney(it.preco_venda)}</td>
+                <td>
+                  <form method="post" class="row" style="gap:6px;margin:0">
+                    <input type="hidden" name="_acao" value="atualizar" />
+                    <input type="hidden" name="produto_id" value={it.produto_id} />
+                    <input
+                      name="quantidade"
+                      type="number"
+                      min="1"
+                      max={it.estoque_atual}
+                      step="1"
+                      value={it.quantidade}
+                      style="width:80px"
+                    />
+                    <button class="btn sec" style="padding:6px 10px">Atualizar</button>
+                  </form>
+                </td>
+                <td><strong>{formatMoney(it.quantidade * it.preco_venda)}</strong></td>
+                <td>
+                  <form method="post" style="margin:0">
+                    <input type="hidden" name="_acao" value="remover" />
+                    <input type="hidden" name="produto_id" value={it.produto_id} />
+                    <button class="btn sec" style="padding:6px 10px" title="Remover do carrinho">✕</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <form method="post" class="card">
+        <input type="hidden" name="_acao" value="finalizar" />
+        <div class="grid">
+          <div class="c8">
+            <label>Observações do pedido (opcional)</label>
+            <input name="observacoes" placeholder="Ex.: Horário de preferência para entrega" />
+          </div>
+          <div class="c4" style="text-align:right">
+            <div class="muted">Total do pedido</div>
+            <div style="font-size:24px;font-weight:700;color:var(--pr)">{formatMoney(totalCarrinho)}</div>
+          </div>
+        </div>
+        <div class="row" style="justify-content:flex-end;margin-top:14px">
+          <button>Finalizar compra</button>
+        </div>
+      </form>
+    </>
+  )}
+</LojaLayout>

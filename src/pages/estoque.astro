@@ -10,9 +10,20 @@ let erro = '';
 let okMsg = sp.get('ok') === '1' ? 'Movimentação de estoque registrada.' : '';
 
 const { results: produtos } = await db()
-  .prepare('SELECT id, codigo, nome, unidade, estoque_atual, estoque_minimo, preco_custo FROM produtos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome COLLATE NOCASE')
+  .prepare('SELECT id, codigo, nome, categoria, unidade, foto, estoque_atual, estoque_minimo, preco_custo, preco_venda FROM produtos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome COLLATE NOCASE')
   .bind(u.empresaId)
-  .all<{ id: number; codigo: string | null; nome: string; unidade: string; estoque_atual: number; estoque_minimo: number; preco_custo: number }>();
+  .all<{
+    id: number;
+    codigo: string | null;
+    nome: string;
+    categoria: string | null;
+    unidade: string;
+    foto: string | null;
+    estoque_atual: number;
+    estoque_minimo: number;
+    preco_custo: number;
+    preco_venda: number;
+  }>();
 
 if (Astro.request.method === 'POST') {
   const f = await Astro.request.formData();
@@ -67,6 +78,22 @@ if (Astro.request.method === 'POST') {
 
 const filtroProduto = Number(sp.get('produto')) || 0;
 const filtroTipo = sp.get('tipo') ?? '';
+const buscaResumo = (sp.get('q') ?? '').trim().toLowerCase();
+const sitResumo = sp.get('sit') ?? '';
+
+const produtosResumo = produtos.filter((pr) => {
+  if (buscaResumo) {
+    const match =
+      pr.nome.toLowerCase().includes(buscaResumo) ||
+      (pr.codigo ?? '').toLowerCase().includes(buscaResumo) ||
+      (pr.categoria ?? '').toLowerCase().includes(buscaResumo);
+    if (!match) return false;
+  }
+  if (sitResumo === 'disponivel' && pr.estoque_atual < 1) return false;
+  if (sitResumo === 'baixo' && !(pr.estoque_minimo > 0 && pr.estoque_atual <= pr.estoque_minimo)) return false;
+  if (sitResumo === 'zerado' && pr.estoque_atual > 0) return false;
+  return true;
+});
 const page = Math.max(1, Number(sp.get('p')) || 1);
 const PER = 25;
 
@@ -114,6 +141,81 @@ const link = (p: number) => {
   {erro && <div class="msg err">{erro}</div>}
   {okMsg && <div class="msg ok">{okMsg}</div>}
 
+  <div class="card">
+    <div class="row" style="margin-bottom:10px">
+      <h2 style="margin:0">Consulta Resumida de Estoque</h2>
+      <span class="spacer"></span>
+      <form method="get" class="row" style="margin:0;gap:8px">
+        <input name="q" value={sp.get('q') ?? ''} placeholder="Filtrar produto, código ou categoria..." style="width:240px" />
+        <select name="sit" style="width:190px">
+          <option value="">Todos os saldos</option>
+          <option value="disponivel" selected={sitResumo === 'disponivel'}>Com estoque (≥ 1)</option>
+          <option value="baixo" selected={sitResumo === 'baixo'}>Estoque baixo</option>
+          <option value="zerado" selected={sitResumo === 'zerado'}>Sem estoque (≤ 0)</option>
+        </select>
+        <button class="btn sec">Buscar</button>
+        {(buscaResumo || sitResumo) && <a class="btn sec" href="/estoque">Limpar</a>}
+      </form>
+    </div>
+
+    <div class="tbl-wrap" style="max-height:360px;overflow-y:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Produto</th>
+            <th>Categoria</th>
+            <th>Quantidade disponível em estoque</th>
+            <th>Estoque mín.</th>
+            <th>Preço venda</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {produtosResumo.length === 0 && (
+            <tr><td colspan="6" class="muted">Nenhum produto encontrado.</td></tr>
+          )}
+          {produtosResumo.map((pr) => {
+            const baixo = pr.estoque_minimo > 0 && pr.estoque_atual <= pr.estoque_minimo;
+            const sem = pr.estoque_atual <= 0;
+            return (
+              <tr>
+                <td>
+                  <div class="row" style="gap:8px;flex-wrap:nowrap">
+                    {pr.foto && (
+                      <img
+                        src={pr.foto}
+                        alt={pr.nome}
+                        style="width:32px;height:32px;object-fit:cover;border-radius:6px;border:1px solid var(--bd);flex-shrink:0"
+                      />
+                    )}
+                    <div>
+                      <a href={`/produtos/${pr.id}`}><strong>{pr.nome}</strong></a>
+                      {pr.codigo && <span class="muted" style="font-size:12px"> ({pr.codigo})</span>}
+                    </div>
+                  </div>
+                </td>
+                <td class="muted">{pr.categoria || '—'}</td>
+                <td>
+                  <strong style={`font-size:15px;color:${sem ? 'var(--dg)' : baixo ? '#b45309' : 'var(--ok)'}`}>
+                    {formatQty(pr.estoque_atual)} {pr.unidade}
+                  </strong>
+                  {sem ? (
+                    <span class="tag off" style="margin-left:6px">Sem estoque</span>
+                  ) : (
+                    baixo && <span class="tag f" style="margin-left:6px">Estoque baixo</span>
+                  )}
+                </td>
+                <td class="muted">{formatQty(pr.estoque_minimo)} {pr.unidade}</td>
+                <td>{formatMoney(pr.preco_venda)}</td>
+                <td><a href={`/estoque?produto=${pr.id}#kardex`} style="font-size:13px">Extrato ↓</a></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <form method="post" class="card">
     <h2>Movimentação avulsa / Ajuste de inventário</h2>
     <div class="grid">
@@ -148,7 +250,7 @@ const link = (p: number) => {
     <p style="margin:10px 0 0"><button>Registrar movimentação</button></p>
   </form>
 
-  <form class="card row" method="get">
+  <form class="card row" method="get" id="kardex">
     <strong>Histórico de movimentações (Kardex)</strong>
     <span class="spacer"></span>
     <select name="produto" style="max-width:280px">

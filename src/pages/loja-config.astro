@@ -1,0 +1,208 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db } from '../lib/auth';
+import { str } from '../lib/validate';
+
+const u = Astro.locals.user!;
+const validColor = (c: string, def: string) => (/^#[0-9a-fA-F]{6}$/.test(c) ? c : def);
+
+let erro = '';
+let ok = false;
+
+let emp = await db()
+  .prepare('SELECT codigo, razao_social, nome_fantasia, loja_nome, loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto FROM empresas WHERE id = ?')
+  .bind(u.empresaId)
+  .first<any>();
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const lojaNome = str(f, 'loja_nome', 120);
+  const corPrimaria = validColor(str(f, 'cor_primaria', 10), '#2563eb');
+  const corSecundaria = validColor(str(f, 'cor_secundaria', 10), '#111827');
+  const corFundo = validColor(str(f, 'cor_fundo', 10), '#f4f6f9');
+  const corTexto = validColor(str(f, 'cor_texto', 10), '#1c2430');
+  let lojaLogo = str(f, 'loja_logo', 300_000); // aceita URL ou Data-URL (base64)
+  if (f.get('remover_logo')) lojaLogo = '';
+
+  if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
+    erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
+  } else {
+    await db()
+      .prepare(
+        `UPDATE empresas
+            SET loja_nome = ?, loja_logo = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?
+          WHERE id = ?`,
+      )
+      .bind(lojaNome || null, lojaLogo || null, corPrimaria, corSecundaria, corFundo, corTexto, u.empresaId)
+      .run();
+    emp = {
+      ...emp,
+      loja_nome: lojaNome,
+      loja_logo: lojaLogo,
+      cor_primaria: corPrimaria,
+      cor_secundaria: corSecundaria,
+      cor_fundo: corFundo,
+      cor_texto: corTexto,
+    };
+    ok = true;
+  }
+}
+
+const urlLoja = `/loja/${emp.codigo}`;
+const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
+---
+<Layout title="Personalizar Loja Virtual" active="loja-config">
+  <div class="row">
+    <h1>Personalizar Minha Loja Virtual</h1>
+    <span class="spacer"></span>
+    <a class="btn" href={urlLoja} target="_blank">🛒 Abrir minha loja ({urlLoja}) ↗</a>
+  </div>
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">Personalização da loja salva com sucesso!</div>}
+
+  <form method="post" id="form-loja">
+    <div class="card">
+      <h2>Identidade e Logomarca</h2>
+      <div class="grid">
+        <div class="c6">
+          <label>Nome de exibição na loja</label>
+          <input name="loja_nome" id="inp-nome" value={emp.loja_nome ?? ''} placeholder={emp.nome_fantasia || emp.razao_social} />
+        </div>
+        <div class="c6">
+          <label>Endereço público da sua loja</label>
+          <input readonly value={`${Astro.url.origin}${urlLoja}`} onclick="this.select()" style="background:#f9fafb" />
+        </div>
+
+        <div class="c6">
+          <label>Enviar imagem da logo (PNG, JPG, SVG ou WebP)</label>
+          <input type="file" id="inp-file-logo" accept="image/*" />
+        </div>
+        <div class="c6">
+          <label>Ou informe a URL da logo</label>
+          <input name="loja_logo" id="inp-logo" value={emp.loja_logo ?? ''} placeholder="https://..." />
+        </div>
+        {emp.loja_logo && (
+          <div class="c12">
+            <label class="check"><input type="checkbox" name="remover_logo" value="1" /> Remover logo atual</label>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cores da Loja</h2>
+      <div class="grid">
+        <div class="c3">
+          <label>Cor principal (botões e destaques)</label>
+          <input type="color" name="cor_primaria" id="inp-cp" value={emp.cor_primaria || '#2563eb'} style="height:42px;padding:4px" />
+        </div>
+        <div class="c3">
+          <label>Cor do cabeçalho / topo</label>
+          <input type="color" name="cor_secundaria" id="inp-cs" value={emp.cor_secundaria || '#111827'} style="height:42px;padding:4px" />
+        </div>
+        <div class="c3">
+          <label>Cor de fundo da página</label>
+          <input type="color" name="cor_fundo" id="inp-cf" value={emp.cor_fundo || '#f4f6f9'} style="height:42px;padding:4px" />
+        </div>
+        <div class="c3">
+          <label>Cor dos textos</label>
+          <input type="color" name="cor_texto" id="inp-ct" value={emp.cor_texto || '#1c2430'} style="height:42px;padding:4px" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Pré-visualização ao vivo</h2>
+      <div id="preview-box" style={`border:1px solid var(--bd);border-radius:10px;overflow:hidden;background:${emp.cor_fundo};color:${emp.cor_texto}`}>
+        <div id="prev-top" style={`display:flex;align-items:center;gap:14px;padding:12px 20px;background:${emp.cor_secundaria};color:#fff`}>
+          <img
+            id="prev-logo"
+            src={emp.loja_logo || ''}
+            alt="Logo"
+            style={`max-height:40px;max-width:140px;object-fit:contain;border-radius:4px;${emp.loja_logo ? '' : 'display:none'}`}
+          />
+          <strong id="prev-nome" style="font-size:18px">{nomeExibicao}</strong>
+          <span style="flex:1"></span>
+          <span style="font-size:13px;opacity:.85">Categorias · Carrinho (2)</span>
+        </div>
+        <div style="padding:20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;min-width:220px">
+            <div style="font-size:12px;opacity:.65">Categoria Exemplo</div>
+            <div style="font-weight:600;margin:4px 0">Produto Exemplo em Estoque</div>
+            <div style="font-size:18px;font-weight:700;margin:8px 0">R$ 99,90</div>
+            <span
+              id="prev-btn"
+              style={`display:inline-block;padding:7px 14px;border-radius:6px;background:${emp.cor_primaria};color:#fff;font-size:14px`}
+            >
+              + Adicionar ao carrinho
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button>Salvar personalização</button>
+    </div>
+  </form>
+</Layout>
+
+<script is:inline>
+  const inpFile = document.getElementById('inp-file-logo');
+  const inpLogo = document.getElementById('inp-logo');
+  const inpNome = document.getElementById('inp-nome');
+  const inpCp = document.getElementById('inp-cp');
+  const inpCs = document.getElementById('inp-cs');
+  const inpCf = document.getElementById('inp-cf');
+  const inpCt = document.getElementById('inp-ct');
+
+  const prevBox = document.getElementById('preview-box');
+  const prevTop = document.getElementById('prev-top');
+  const prevLogo = document.getElementById('prev-logo');
+  const prevNome = document.getElementById('prev-nome');
+  const prevBtn = document.getElementById('prev-btn');
+
+  function syncPreview() {
+    prevBox.style.background = inpCf.value;
+    prevBox.style.color = inpCt.value;
+    prevTop.style.background = inpCs.value;
+    prevBtn.style.background = inpCp.value;
+    prevNome.textContent = inpNome.value.trim() || inpNome.placeholder;
+    if (inpLogo.value.trim()) {
+      prevLogo.src = inpLogo.value.trim();
+      prevLogo.style.display = 'block';
+    } else {
+      prevLogo.style.display = 'none';
+    }
+  }
+
+  [inpLogo, inpNome, inpCp, inpCs, inpCf, inpCt].forEach((el) => el.addEventListener('input', syncPreview));
+
+  // Converte imagem selecionada para Data-URL compactada (até 320px de largura) para salvar direto no banco
+  inpFile.addEventListener('change', () => {
+    const file = inpFile.files && inpFile.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 320;
+        const maxH = 120;
+        let w = img.width;
+        let h = img.height;
+        const ratio = Math.min(maxW / w, maxH / h, 1);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        inpLogo.value = canvas.toDataURL('image/png');
+        syncPreview();
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+</script>

@@ -1,0 +1,187 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatMoney, formatDoc } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+const sp = Astro.url.searchParams;
+const q = (sp.get('q') ?? '').trim().slice(0, 80);
+const clienteId = Number(sp.get('cliente')) || 0;
+const status = sp.get('status') ?? '';
+const de = sp.get('de') ?? '';
+const ate = sp.get('ate') ?? '';
+const page = Math.max(1, Number(sp.get('p')) || 1);
+const PER = 20;
+
+const { results: clientes } = await db()
+  .prepare('SELECT id, nome FROM parceiros WHERE empresa_id = ? AND eh_cliente = 1 ORDER BY nome COLLATE NOCASE')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string }>();
+
+const where = ['p.empresa_id = ?'];
+const args: unknown[] = [u.empresaId];
+
+if (q) {
+  const numId = Number(q.replace(/\D/g, ''));
+  where.push(`(c.nome LIKE ? OR c.documento LIKE ?${numId ? ' OR p.id = ?' : ''})`);
+  args.push(`%${q}%`, `%${q}%`);
+  if (numId) args.push(numId);
+}
+if (clienteId > 0) {
+  where.push('p.parceiro_id = ?');
+  args.push(clienteId);
+}
+if (['novo', 'separacao', 'entregue', 'cancelado'].includes(status)) {
+  where.push('p.status = ?');
+  args.push(status);
+}
+if (de) {
+  where.push('substr(p.criado_em, 1, 10) >= ?');
+  args.push(de);
+}
+if (ate) {
+  where.push('substr(p.criado_em, 1, 10) <= ?');
+  args.push(ate);
+}
+
+const W = where.join(' AND ');
+
+const resumo = await db()
+  .prepare(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN p.status <> 'cancelado' THEN p.valor_total ELSE 0 END), 0) AS soma_ativos,
+            COALESCE(SUM(CASE WHEN p.status = 'novo' THEN 1 ELSE 0 END), 0) AS novos
+       FROM loja_pedidos p
+       JOIN parceiros c ON c.id = p.parceiro_id AND c.empresa_id = p.empresa_id
+      WHERE ${W}`,
+  )
+  .bind(...args)
+  .first<{ total: number; soma_ativos: number; novos: number }>();
+
+const total = resumo?.total ?? 0;
+
+const { results } = await db()
+  .prepare(
+    `SELECT p.id, p.valor_total, p.status, p.origem, p.criado_em,
+            c.id AS cliente_id, c.nome AS cliente_nome, c.documento AS cliente_doc,
+            COALESCE(c.celular, c.telefone) AS cliente_fone,
+            (SELECT COUNT(*) FROM loja_pedidos_itens i WHERE i.pedido_id = p.id AND i.empresa_id = p.empresa_id) AS qtd_itens
+       FROM loja_pedidos p
+       JOIN parceiros c ON c.id = p.parceiro_id AND c.empresa_id = p.empresa_id
+      WHERE ${W}
+      ORDER BY p.id DESC
+      LIMIT ? OFFSET ?`,
+  )
+  .bind(...args, PER, (page - 1) * PER)
+  .all<any>();
+
+const pages = Math.max(1, Math.ceil(total / PER));
+const link = (p: number) => {
+  const s = new URLSearchParams(sp);
+  s.set('p', String(p));
+  return '?' + s;
+};
+const ok = sp.get('ok');
+
+const statusLabel: Record<string, { txt: string; cls: string }> = {
+  novo: { txt: 'Novo / Aguardando', cls: 'tag' },
+  separacao: { txt: 'Em separação', cls: 'tag f' },
+  entregue: { txt: 'Faturado / Entregue', cls: 'tag' },
+  cancelado: { txt: 'Cancelado', cls: 'tag off' },
+};
+---
+<Layout title="Pedidos de Clientes" active="pedidos">
+  <div class="row">
+    <h1>Pedidos de Clientes</h1>
+    <span class="spacer"></span>
+    <a class="btn" href="/pedidos/novo">+ Novo pedido manual</a>
+  </div>
+  {ok === 'salvo' && <div class="msg ok">Pedido registrado e estoque baixado com sucesso.</div>}
+  {ok === 'status' && <div class="msg ok">Situação do pedido atualizada.</div>}
+
+  <div class="grid">
+    <div class="card c4">
+      <div class="muted">Pedidos listados</div>
+      <h1 style="margin:0">{total}</h1>
+    </div>
+    <div class="card c4">
+      <div class="muted">Novos / aguardando atendimento</div>
+      <h1 style="margin:0">{resumo?.novos ?? 0}</h1>
+    </div>
+    <div class="card c4">
+      <div class="muted">Valor total (exceto cancelados)</div>
+      <h1 style="margin:0">{formatMoney(resumo?.soma_ativos ?? 0)}</h1>
+    </div>
+  </div>
+
+  <form class="card row" method="get">
+    <input name="q" value={q} placeholder="Nº do pedido, nome ou CPF/CNPJ" style="flex:2;min-width:190px" />
+    <select name="cliente" style="flex:2">
+      <option value="">Todos os clientes</option>
+      {clientes.map((c) => <option value={c.id} selected={clienteId === c.id}>{c.nome}</option>)}
+    </select>
+    <select name="status" style="flex:1">
+      <option value="">Todas as situações</option>
+      <option value="novo" selected={status === 'novo'}>Novo / Aguardando</option>
+      <option value="separacao" selected={status === 'separacao'}>Em separação</option>
+      <option value="entregue" selected={status === 'entregue'}>Faturado / Entregue</option>
+      <option value="cancelado" selected={status === 'cancelado'}>Cancelado</option>
+    </select>
+    <input name="de" type="date" value={de} title="Data inicial" style="flex:1" />
+    <input name="ate" type="date" value={ate} title="Data final" style="flex:1" />
+    <button>Filtrar</button>
+  </form>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Pedido</th>
+          <th>Data / Hora</th>
+          <th>Cliente</th>
+          <th>Origem</th>
+          <th>Itens</th>
+          <th>Valor Total</th>
+          <th>Situação</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {results.length === 0 && <tr><td colspan="8" class="muted">Nenhum pedido encontrado.</td></tr>}
+        {results.map((r) => {
+          const st = statusLabel[r.status] ?? { txt: r.status, cls: 'tag' };
+          return (
+            <tr>
+              <td><a href={`/pedidos/${r.id}`}><strong>#{r.id}</strong></a></td>
+              <td class="muted" style="white-space:nowrap">{r.criado_em}</td>
+              <td>
+                <a href={`/clientes/${r.cliente_id}`}>{r.cliente_nome}</a>
+                <div class="muted" style="font-size:12px">
+                  {[formatDoc(r.cliente_doc), r.cliente_fone].filter(Boolean).join(' · ')}
+                </div>
+              </td>
+              <td>
+                <span class="muted" style="font-size:12px">{r.origem === 'INTERNO' ? 'Balcão / Interno' : 'Loja Virtual'}</span>
+              </td>
+              <td>{r.qtd_itens}</td>
+              <td><strong>{formatMoney(r.valor_total)}</strong></td>
+              <td>
+                <span class={st.cls} style={r.status === 'entregue' ? 'background:#dcfce7;color:#166534' : ''}>
+                  {st.txt}
+                </span>
+              </td>
+              <td><a href={`/pedidos/${r.id}`}>Abrir →</a></td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager row">
+    <span class="muted">{total} pedido(s)</span><span class="spacer"></span>
+    {page > 1 && <a class="btn sec" href={link(page - 1)}>← Anterior</a>}
+    <span class="muted">Página {page} de {pages}</span>
+    {page < pages && <a class="btn sec" href={link(page + 1)}>Próxima →</a>}
+  </div>
+</Layout>

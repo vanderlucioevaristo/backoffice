@@ -1,0 +1,118 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE } from '../../../lib/auth';
+import { formatMoney, formatQty } from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
+const cliente = token ? await getSessionClient(token, empCodigo) : null;
+if (!cliente) {
+  return Astro.redirect(`/loja/${empCodigo}/login`);
+}
+
+const { results: pedidos } = await db()
+  .prepare('SELECT id, valor_total, status, observacoes, criado_em FROM loja_pedidos WHERE empresa_id = ? AND parceiro_id = ? ORDER BY id DESC')
+  .bind(empresa.id, cliente.id)
+  .all<{ id: number; valor_total: number; status: string; observacoes: string | null; criado_em: string }>();
+
+const { results: todosItens } = await db()
+  .prepare(
+    `SELECT i.pedido_id, i.quantidade, i.preco_unitario, i.subtotal, p.nome, p.unidade, p.foto
+       FROM loja_pedidos_itens i
+       JOIN loja_pedidos lp ON lp.id = i.pedido_id AND lp.empresa_id = i.empresa_id
+       JOIN produtos p ON p.id = i.produto_id AND p.empresa_id = i.empresa_id
+      WHERE i.empresa_id = ? AND lp.parceiro_id = ?
+      ORDER BY i.id ASC`,
+  )
+  .bind(empresa.id, cliente.id)
+  .all<{
+    pedido_id: number;
+    quantidade: number;
+    preco_unitario: number;
+    subtotal: number;
+    nome: string;
+    unidade: string;
+    foto: string | null;
+  }>();
+
+const countCart = await db()
+  .prepare('SELECT COALESCE(SUM(quantidade), 0) AS n FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ?')
+  .bind(empresa.id, cliente.id)
+  .first<{ n: number }>();
+
+const statusLabel: Record<string, { txt: string; cls: string }> = {
+  novo: { txt: 'Recebido / Aguardando', cls: 'tag' },
+  separacao: { txt: 'Em separação', cls: 'tag f' },
+  entregue: { txt: 'Entregue / Concluído', cls: 'tag' },
+  cancelado: { txt: 'Cancelado', cls: 'tag off' },
+};
+const baseUrl = `/loja/${empCodigo}`;
+---
+<LojaLayout title="Meus Pedidos" empresa={empresa} cliente={cliente} qtdCarrinho={Number(countCart?.n ?? 0)}>
+  <div class="row">
+    <h1>Meus Pedidos</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href={baseUrl}>← Voltar ao catálogo</a>
+  </div>
+
+  {pedidos.length === 0 ? (
+    <div class="card muted">
+      Você ainda não realizou nenhum pedido. <a href={baseUrl}>Explore nossos produtos</a>.
+    </div>
+  ) : (
+    pedidos.map((ped) => {
+      const itens = todosItens.filter((i) => i.pedido_id === ped.id);
+      const st = statusLabel[ped.status] ?? { txt: ped.status, cls: 'tag' };
+      return (
+        <div class="card">
+          <div class="row" style="margin-bottom:10px">
+            <strong>Pedido #{ped.id}</strong>
+            <span class="muted">· {ped.criado_em}</span>
+            <span class={st.cls} style={ped.status === 'entregue' ? 'background:#dcfce7;color:#166534' : ''}>
+              {st.txt}
+            </span>
+            <span class="spacer"></span>
+            <strong style="font-size:17px;color:var(--pr)">{formatMoney(ped.valor_total)}</strong>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th>Quantidade</th>
+                  <th>Preço unit.</th>
+                  <th>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itens.map((it) => (
+                  <tr>
+                    <td>
+                      <div class="row" style="gap:8px;flex-wrap:nowrap">
+                        {it.foto && (
+                          <img
+                            src={it.foto}
+                            alt={it.nome}
+                            style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--bd)"
+                          />
+                        )}
+                        <span>{it.nome}</span>
+                      </div>
+                    </td>
+                    <td>{formatQty(it.quantidade)} {it.unidade}</td>
+                    <td>{formatMoney(it.preco_unitario)}</td>
+                    <td><strong>{formatMoney(it.subtotal)}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {ped.observacoes && <div class="muted" style="margin-top:8px;font-size:13px">Obs.: {ped.observacoes}</div>}
+        </div>
+      );
+    })
+  )}
+</LojaLayout>

@@ -31,3 +31,5 @@ Acesse `http://localhost:4321/cadastro-empresa` para criar a primeira empresa e 
    - Build command: `npm run build`
    - Deploy command: `npx wrangler deploy`
 5. (Opcional) Para fechar o auto-cadastro público de novas empresas em produção, defina a variável `ALLOW_SIGNUP=false` no Worker.
+
+

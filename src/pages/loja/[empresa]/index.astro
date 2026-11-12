@@ -176,7 +176,7 @@ const baseUrl = `/loja/${empCodigo}`;
         <div class="ofertas-title">
           <span class="ofertas-pill">🔥 Ofertas</span>
           <span>Destaques selecionados para você</span>
-          <span class="muted" style="font-size:12px;font-weight:400">
+          <span class="muted ofertas-hint" style="font-size:12px;font-weight:400">
             (clique em uma oferta para abrir e adicionar ao carrinho)
           </span>
         </div>
@@ -300,37 +300,36 @@ const baseUrl = `/loja/${empCodigo}`;
     </div>
   )}
 
-  <dialog id="dlg-prod" class="modal" style="max-width:520px;border:none;border-radius:8px">
+  <dialog id="dlg-prod" class="modal" style="max-width:520px;width:calc(100vw - 24px);border:none;border-radius:14px;padding:16px">
     <form method="post" id="form-add-cart">
       <input type="hidden" name="produto_id" id="m-id" />
-      <div class="row" style="align-items:flex-start;gap:16px;margin-bottom:14px">
+      <div class="row" style="align-items:flex-start;gap:14px;margin-bottom:14px">
         <div
           id="m-icon-box"
-          style="width:88px;height:88px;border-radius:6px;border:1px solid #eee;background:#fff;display:grid;place-items:center;overflow:hidden;font-size:30px;flex-shrink:0;padding:4px"
+          style="width:80px;height:80px;border-radius:10px;border:1px solid #eee;background:#fff;display:grid;place-items:center;overflow:hidden;font-size:28px;flex-shrink:0;padding:4px"
         >
           <img id="m-foto" src="" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:none" />
           <span id="m-placeholder">📦</span>
         </div>
-        <div style="flex:1;min-width:180px">
+        <div style="flex:1;min-width:160px">
           <div id="m-cat" class="muted" style="font-size:12px"></div>
-          <h2 id="m-nome" style="margin:2px 0 6px;font-size:18px;font-weight:600"></h2>
+          <h2 id="m-nome" style="margin:2px 0 6px;font-size:17px;font-weight:600"></h2>
           <div id="m-preco-antigo" style="font-size:13px;color:#94a3b8;text-decoration:line-through;display:none"></div>
-          <div id="m-preco" style="font-size:26px;font-weight:400;color:#111"></div>
-          <div style="font-size:13px;margin-top:4px;color:#00a650;font-weight:600">
+          <div id="m-preco" style="font-size:24px;font-weight:500;color:#111"></div>
+          <div style="font-size:12.5px;margin-top:4px;color:#00a650;font-weight:600">
             ✓ Quantidade disponível: <span id="m-est"></span>
           </div>
         </div>
       </div>
 
-      <p id="m-desc" class="muted" style="font-size:14px;margin:0 0 14px;display:none"></p>
+      <p id="m-desc" class="muted" style="font-size:13.5px;margin:0 0 14px;display:none"></p>
 
-      <div class="row" style="padding-top:12px;border-top:1px solid #eee">
-        <div style="width:120px">
+      <div class="row" style="padding-top:12px;border-top:1px solid #eee;justify-content:space-between;align-items:flex-end">
+        <div style="width:100px">
           <label for="m-qtd">Quantidade</label>
           <input id="m-qtd" name="quantidade" type="number" min="1" step="1" value="1" required />
         </div>
-        <span class="spacer"></span>
-        <div class="row" style="margin-top:18px">
+        <div class="row" style="gap:8px">
           <button type="button" class="btn sec" id="btn-fechar-prod">Fechar</button>
           <button type="submit" style="font-weight:600">🛒 Adicionar ao carrinho</button>
         </div>

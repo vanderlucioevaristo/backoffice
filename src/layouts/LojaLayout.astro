@@ -662,6 +662,156 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         font-weight: 600;
         cursor: pointer;
       }
+
+      /* Responsividade para celulares e telas menores */
+      @media (max-width: 768px) {
+        .ml-header-inner {
+          padding: 8px 12px;
+          gap: 6px;
+        }
+        .ml-top-row {
+          gap: 8px;
+        }
+        .ml-brand {
+          font-size: 16px;
+          gap: 8px;
+        }
+        .ml-brand img {
+          max-height: 28px;
+          max-width: 96px;
+        }
+        .ml-search {
+          order: 3;
+          flex: 1 1 100%;
+          min-width: 100%;
+          max-width: 100%;
+          border-radius: 6px;
+        }
+        .ml-search input {
+          padding: 7px 10px;
+          font-size: 14px;
+        }
+        .ml-user-links {
+          gap: 10px;
+          font-size: 12px;
+          margin-left: auto;
+        }
+        .ml-nav-row {
+          overflow-x: auto;
+          scrollbar-width: none;
+          padding-bottom: 2px;
+        }
+        .ml-nav-row::-webkit-scrollbar {
+          display: none;
+        }
+        .ml-cats {
+          flex-wrap: nowrap;
+          white-space: nowrap;
+          gap: 12px;
+          font-size: 12px;
+        }
+        .ml-page {
+          margin: 12px auto 28px;
+          padding: 0 10px;
+        }
+        .ml-cat-bar {
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          white-space: nowrap;
+          padding-bottom: 4px;
+          margin-bottom: 10px;
+          scrollbar-width: none;
+        }
+        .ml-cat-bar::-webkit-scrollbar {
+          display: none;
+        }
+        .ml-cat-chip {
+          padding: 4px 10px;
+          font-size: 12px;
+          flex-shrink: 0;
+        }
+        /* Grid de 2 colunas em celulares para nunca virar lista de 1 coluna */
+        .prod-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .ml-card {
+          border-radius: 12px;
+        }
+        .ml-card-thumb {
+          height: 80px;
+          padding: 6px;
+        }
+        .ml-card-thumb img {
+          max-width: 62px;
+          max-height: 62px;
+        }
+        .ml-card-body {
+          padding: 8px 10px 10px;
+        }
+        .ml-price {
+          font-size: 16px;
+        }
+        .ml-stock-badge {
+          font-size: 10.5px;
+        }
+        .ml-title {
+          font-size: 12px;
+        }
+        /* Carrossel compacto no celular */
+        .ofertas-section {
+          padding: 8px 10px 10px;
+          margin-bottom: 12px;
+          border-radius: 12px;
+        }
+        .ofertas-title {
+          font-size: 13px;
+        }
+        .ofertas-hint {
+          display: none;
+        }
+        .oferta-slide {
+          flex: 0 0 148px;
+          padding: 7px 8px;
+          border-radius: 12px;
+        }
+        .oferta-thumb {
+          height: 52px;
+        }
+        .oferta-thumb img {
+          max-width: 44px;
+          max-height: 44px;
+        }
+        .oferta-new-price {
+          font-size: 15px;
+        }
+        /* Rodapé e Bot no celular */
+        .ml-footer-inner {
+          padding: 20px 14px 16px;
+          grid-template-columns: 1fr;
+          gap: 16px;
+        }
+        .bot-fab {
+          right: 12px;
+          bottom: 12px;
+          padding: 10px 14px;
+          font-size: 12.5px;
+        }
+        .bot-win {
+          right: 10px;
+          left: 10px;
+          bottom: 60px;
+          width: auto;
+          max-width: none;
+          height: 68vh;
+        }
+      }
+
+      @media (max-width: 380px) {
+        .ml-user-hello {
+          display: none;
+        }
+      }
     </style>
   </head>
   <body>
@@ -685,7 +835,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
 
           {!bare && cliente && (
             <div class="ml-user-links">
-              <span>Olá, <strong>{cliente.nome.split(' ')[0]}</strong></span>
+              <span class="ml-user-hello">Olá, <strong>{cliente.nome.split(' ')[0]}</strong></span>
               <a href={`${baseUrl}/meus-pedidos`}>Compras</a>
               <a href={`${baseUrl}/carrinho`} class="ml-cart-pill">
                 🛒 Carrinho <span class="ml-badge">{qtdCarrinho}</span>

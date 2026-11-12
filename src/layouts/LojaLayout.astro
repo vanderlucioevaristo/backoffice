@@ -640,19 +640,25 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       }
       .bot-form {
         display: flex;
+        align-items: center;
         gap: 6px;
         padding: 10px;
         background: #fff;
         border-top: 1px solid #e2e8f0;
+        flex-shrink: 0;
       }
       .bot-form input {
-        flex: 1;
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 0;
         font-size: 13px;
         padding: 8px 10px;
         border: 1px solid #cbd5e1;
         border-radius: 8px;
       }
       .bot-form button {
+        flex-shrink: 0;
+        white-space: nowrap;
         background: var(--pr);
         color: #fff;
         border: none;
@@ -794,16 +800,61 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         .bot-fab {
           right: 12px;
           bottom: 12px;
-          padding: 10px 14px;
-          font-size: 12.5px;
+          padding: 9px 13px;
+          font-size: 12px;
         }
         .bot-win {
-          right: 10px;
-          left: 10px;
-          bottom: 60px;
-          width: auto;
-          max-width: none;
-          height: 68vh;
+          right: 12px;
+          left: auto;
+          bottom: 56px;
+          width: min(295px, calc(100vw - 24px));
+          height: 350px;
+          max-height: calc(100dvh - 135px);
+          border-radius: 12px;
+        }
+        .bot-head {
+          padding: 8px 12px;
+        }
+        .bot-head-title {
+          font-size: 12.5px;
+        }
+        .bot-head-sub {
+          font-size: 10px;
+        }
+        .bot-close {
+          width: 24px;
+          height: 24px;
+          font-size: 12px;
+        }
+        .bot-msgs {
+          padding: 8px 10px;
+          gap: 7px;
+        }
+        .bot-bubble {
+          font-size: 12px;
+          padding: 7px 9px;
+          line-height: 1.35;
+        }
+        .bot-chips {
+          padding: 6px 8px;
+          gap: 5px;
+          flex-shrink: 0;
+        }
+        .bot-chip {
+          font-size: 11px;
+          padding: 3px 8px;
+        }
+        .bot-form {
+          padding: 7px 8px;
+          gap: 5px;
+        }
+        .bot-form input {
+          padding: 6px 8px;
+          font-size: 12.5px;
+        }
+        .bot-form button {
+          padding: 6px 10px;
+          font-size: 12px;
         }
       }
 

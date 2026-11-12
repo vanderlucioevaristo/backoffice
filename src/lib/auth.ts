@@ -129,18 +129,36 @@ export type LojaEmpresa = {
   id: number;
   codigo: string;
   nome: string;
+  razao_social: string;
+  cnpj: string | null;
   loja_logo: string | null;
   cor_primaria: string;
   cor_secundaria: string;
   cor_fundo: string;
   cor_texto: string;
+  rodape_sobre: string | null;
+  rodape_telefone: string | null;
+  rodape_whatsapp: string | null;
+  rodape_email: string | null;
+  rodape_horario: string | null;
+  rodape_endereco: string | null;
+  rodape_suporte: string | null;
+  rodape_instagram: string | null;
+  rodape_facebook: string | null;
+  rodape_copyright: string | null;
+  rodape_cor_fundo: string;
+  rodape_cor_texto: string;
 };
 
 export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null> {
   const row = await db()
     .prepare(
       `SELECT id, codigo, COALESCE(NULLIF(loja_nome,''), nome_fantasia, razao_social) AS nome,
-              loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto
+              razao_social, cnpj,
+              loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
+              rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
+              rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
+              rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto
          FROM empresas
         WHERE codigo = ? AND ativa = 1`,
     )

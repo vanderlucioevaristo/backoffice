@@ -10,7 +10,14 @@ let erro = '';
 let ok = false;
 
 let emp = await db()
-  .prepare('SELECT codigo, razao_social, nome_fantasia, loja_nome, loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto FROM empresas WHERE id = ?')
+  .prepare(
+    `SELECT codigo, razao_social, nome_fantasia, cnpj,
+            loja_nome, loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
+            rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
+            rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
+            rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto
+       FROM empresas WHERE id = ?`,
+  )
   .bind(u.empresaId)
   .first<any>();
 
@@ -24,16 +31,52 @@ if (Astro.request.method === 'POST') {
   let lojaLogo = str(f, 'loja_logo', 300_000); // aceita URL ou Data-URL (base64)
   if (f.get('remover_logo')) lojaLogo = '';
 
+  const rodapeSobre = str(f, 'rodape_sobre', 600);
+  const rodapeTelefone = str(f, 'rodape_telefone', 60);
+  const rodapeWhatsapp = str(f, 'rodape_whatsapp', 60);
+  const rodapeEmail = str(f, 'rodape_email', 120);
+  const rodapeHorario = str(f, 'rodape_horario', 120);
+  const rodapeEndereco = str(f, 'rodape_endereco', 400);
+  const rodapeSuporte = str(f, 'rodape_suporte', 600);
+  const rodapeInstagram = str(f, 'rodape_instagram', 160);
+  const rodapeFacebook = str(f, 'rodape_facebook', 160);
+  const rodapeCopyright = str(f, 'rodape_copyright', 240);
+  const rodapeCorFundo = validColor(str(f, 'rodape_cor_fundo', 10), '#ffffff');
+  const rodapeCorTexto = validColor(str(f, 'rodape_cor_texto', 10), '#333333');
+
   if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
     erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
   } else {
     await db()
       .prepare(
         `UPDATE empresas
-            SET loja_nome = ?, loja_logo = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?
+            SET loja_nome = ?, loja_logo = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?,
+                rodape_sobre = ?, rodape_telefone = ?, rodape_whatsapp = ?, rodape_email = ?,
+                rodape_horario = ?, rodape_endereco = ?, rodape_suporte = ?, rodape_instagram = ?,
+                rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?
           WHERE id = ?`,
       )
-      .bind(lojaNome || null, lojaLogo || null, corPrimaria, corSecundaria, corFundo, corTexto, u.empresaId)
+      .bind(
+        lojaNome || null,
+        lojaLogo || null,
+        corPrimaria,
+        corSecundaria,
+        corFundo,
+        corTexto,
+        rodapeSobre || null,
+        rodapeTelefone || null,
+        rodapeWhatsapp || null,
+        rodapeEmail || null,
+        rodapeHorario || null,
+        rodapeEndereco || null,
+        rodapeSuporte || null,
+        rodapeInstagram || null,
+        rodapeFacebook || null,
+        rodapeCopyright || null,
+        rodapeCorFundo,
+        rodapeCorTexto,
+        u.empresaId,
+      )
       .run();
     emp = {
       ...emp,
@@ -43,6 +86,18 @@ if (Astro.request.method === 'POST') {
       cor_secundaria: corSecundaria,
       cor_fundo: corFundo,
       cor_texto: corTexto,
+      rodape_sobre: rodapeSobre,
+      rodape_telefone: rodapeTelefone,
+      rodape_whatsapp: rodapeWhatsapp,
+      rodape_email: rodapeEmail,
+      rodape_horario: rodapeHorario,
+      rodape_endereco: rodapeEndereco,
+      rodape_suporte: rodapeSuporte,
+      rodape_instagram: rodapeInstagram,
+      rodape_facebook: rodapeFacebook,
+      rodape_copyright: rodapeCopyright,
+      rodape_cor_fundo: rodapeCorFundo,
+      rodape_cor_texto: rodapeCorTexto,
     };
     ok = true;
   }
@@ -112,6 +167,84 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
     </div>
 
     <div class="card">
+      <h2>Rodapé Personalizável da Loja (Contato, Suporte e Endereço)</h2>
+      <div class="grid">
+        <div class="c3">
+          <label>Telefone de contato</label>
+          <input name="rodape_telefone" id="inp-rtel" value={emp.rodape_telefone ?? ''} placeholder="(11) 3000-0000" />
+        </div>
+        <div class="c3">
+          <label>WhatsApp de atendimento</label>
+          <input name="rodape_whatsapp" id="inp-rwhats" value={emp.rodape_whatsapp ?? ''} placeholder="(11) 99999-9999" />
+        </div>
+        <div class="c3">
+          <label>E-mail de suporte / SAC</label>
+          <input type="email" name="rodape_email" id="inp-remail" value={emp.rodape_email ?? ''} placeholder="contato@sualoja.com.br" />
+        </div>
+        <div class="c3">
+          <label>Horário de atendimento</label>
+          <input name="rodape_horario" id="inp-rhor" value={emp.rodape_horario ?? ''} placeholder="Seg a Sex, das 8h às 18h" />
+        </div>
+
+        <div class="c6">
+          <label>Sobre a loja / Texto institucional</label>
+          <textarea
+            name="rodape_sobre"
+            id="inp-rsobre"
+            rows="3"
+            placeholder="Breve apresentação da sua empresa exibida na primeira coluna do rodapé..."
+          >{emp.rodape_sobre ?? ''}</textarea>
+        </div>
+        <div class="c6">
+          <label>Informações de Suporte, Trocas, Devoluções e Entrega</label>
+          <textarea
+            name="rodape_suporte"
+            id="inp-rsup"
+            rows="3"
+            placeholder="Ex: Garantia de 90 dias, política de trocas em até 7 dias corridos, suporte técnico..."
+          >{emp.rodape_suporte ?? ''}</textarea>
+        </div>
+
+        <div class="c12">
+          <label>Endereço físico / Localização da loja</label>
+          <textarea
+            name="rodape_endereco"
+            id="inp-rend"
+            rows="2"
+            placeholder="Ex: Av. Paulista, 1000 - Bela Vista, São Paulo/SP - CEP 01310-100"
+          >{emp.rodape_endereco ?? ''}</textarea>
+        </div>
+
+        <div class="c3">
+          <label>Instagram (usuário ou link)</label>
+          <input name="rodape_instagram" value={emp.rodape_instagram ?? ''} placeholder="@sualoja" />
+        </div>
+        <div class="c3">
+          <label>Facebook / Site institucional</label>
+          <input name="rodape_facebook" value={emp.rodape_facebook ?? ''} placeholder="https://facebook.com/..." />
+        </div>
+        <div class="c3">
+          <label>Cor de fundo do rodapé</label>
+          <input type="color" name="rodape_cor_fundo" id="inp-rcf" value={emp.rodape_cor_fundo || '#ffffff'} style="height:42px;padding:4px" />
+        </div>
+        <div class="c3">
+          <label>Cor do texto do rodapé</label>
+          <input type="color" name="rodape_cor_texto" id="inp-rct" value={emp.rodape_cor_texto || '#333333'} style="height:42px;padding:4px" />
+        </div>
+
+        <div class="c12">
+          <label>Texto de direitos reservados / Copyright (opcional — deixe em branco para usar Razão Social e CNPJ)</label>
+          <input
+            name="rodape_copyright"
+            id="inp-rcopy"
+            value={emp.rodape_copyright ?? ''}
+            placeholder={`© ${new Date().getFullYear()} ${emp.razao_social} · Todos os direitos reservados.`}
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Pré-visualização ao vivo</h2>
       <div id="preview-box" style={`border:1px solid var(--bd);border-radius:10px;overflow:hidden;background:${emp.cor_fundo};color:${emp.cor_texto}`}>
         <div id="prev-top" style={`display:flex;align-items:center;gap:14px;padding:12px 20px;background:${emp.cor_secundaria};color:#fff`}>
@@ -138,6 +271,31 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             </span>
           </div>
         </div>
+        <div
+          id="prev-footer"
+          style={`padding:16px 20px;border-top:1px solid rgba(0,0,0,.1);background:${emp.rodape_cor_fundo || '#ffffff'};color:${emp.rodape_cor_texto || '#333333'};font-size:12px`}
+        >
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px">
+            <div>
+              <strong id="prev-fnome">{nomeExibicao}</strong>
+              <div id="prev-fsobre" style="opacity:.85;margin-top:4px">{emp.rodape_sobre || 'Sua loja virtual oficial.'}</div>
+            </div>
+            <div>
+              <strong>Contato e Atendimento</strong>
+              <div id="prev-fcontato" style="opacity:.85;margin-top:4px">
+                {[emp.rodape_telefone, emp.rodape_whatsapp, emp.rodape_email, emp.rodape_horario].filter(Boolean).join(' · ') || 'Telefone, WhatsApp e E-mail'}
+              </div>
+            </div>
+            <div>
+              <strong>Suporte ao Cliente</strong>
+              <div id="prev-fsuporte" style="opacity:.85;margin-top:4px">{emp.rodape_suporte || 'Dúvidas sobre pedidos, entregas e trocas.'}</div>
+            </div>
+            <div>
+              <strong>Endereço</strong>
+              <div id="prev-fend" style="opacity:.85;margin-top:4px">{emp.rodape_endereco || 'Endereço da loja'}</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -161,22 +319,52 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   const prevLogo = document.getElementById('prev-logo');
   const prevNome = document.getElementById('prev-nome');
   const prevBtn = document.getElementById('prev-btn');
+  const prevFooter = document.getElementById('prev-footer');
+  const prevFnome = document.getElementById('prev-fnome');
+  const prevFsobre = document.getElementById('prev-fsobre');
+  const prevFcontato = document.getElementById('prev-fcontato');
+  const prevFsuporte = document.getElementById('prev-fsuporte');
+  const prevFend = document.getElementById('prev-fend');
+
+  const inpRtel = document.getElementById('inp-rtel');
+  const inpRwhats = document.getElementById('inp-rwhats');
+  const inpRemail = document.getElementById('inp-remail');
+  const inpRhor = document.getElementById('inp-rhor');
+  const inpRsobre = document.getElementById('inp-rsobre');
+  const inpRsup = document.getElementById('inp-rsup');
+  const inpRend = document.getElementById('inp-rend');
+  const inpRcf = document.getElementById('inp-rcf');
+  const inpRct = document.getElementById('inp-rct');
 
   function syncPreview() {
     prevBox.style.background = inpCf.value;
     prevBox.style.color = inpCt.value;
     prevTop.style.background = inpCs.value;
     prevBtn.style.background = inpCp.value;
-    prevNome.textContent = inpNome.value.trim() || inpNome.placeholder;
+    const nome = inpNome.value.trim() || inpNome.placeholder;
+    prevNome.textContent = nome;
+    prevFnome.textContent = nome;
     if (inpLogo.value.trim()) {
       prevLogo.src = inpLogo.value.trim();
       prevLogo.style.display = 'block';
     } else {
       prevLogo.style.display = 'none';
     }
+    prevFooter.style.background = inpRcf.value;
+    prevFooter.style.color = inpRct.value;
+    prevFsobre.textContent = inpRsobre.value.trim() || 'Sua loja virtual oficial.';
+    prevFcontato.textContent =
+      [inpRtel.value.trim(), inpRwhats.value.trim(), inpRemail.value.trim(), inpRhor.value.trim()]
+        .filter(Boolean)
+        .join(' · ') || 'Telefone, WhatsApp e E-mail';
+    prevFsuporte.textContent = inpRsup.value.trim() || 'Dúvidas sobre pedidos, entregas e trocas.';
+    prevFend.textContent = inpRend.value.trim() || 'Endereço da loja';
   }
 
-  [inpLogo, inpNome, inpCp, inpCs, inpCf, inpCt].forEach((el) => el.addEventListener('input', syncPreview));
+  [
+    inpLogo, inpNome, inpCp, inpCs, inpCf, inpCt,
+    inpRtel, inpRwhats, inpRemail, inpRhor, inpRsobre, inpRsup, inpRend, inpRcf, inpRct,
+  ].forEach((el) => el && el.addEventListener('input', syncPreview));
 
   // Converte imagem selecionada para Data-URL compactada (até 320px de largura) para salvar direto no banco
   inpFile.addEventListener('change', () => {

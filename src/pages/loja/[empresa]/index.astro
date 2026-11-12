@@ -138,7 +138,7 @@ const baseUrl = `/loja/${empCodigo}`;
   </div>
 
   <div class="ml-cat-bar">
-    <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>Todas</a>
+    <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>Todas </a>
     {categoriasRows.map((c) => (
       <a
         href={`${baseUrl}?cat=${encodeURIComponent(c.categoria)}`}

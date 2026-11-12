@@ -1,6 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
+import { enviarEmailStatusPedido, STATUS_PEDIDO_INFO } from '../../lib/email';
 import { formatDoc, formatMoney, formatQty } from '../../lib/validate';
 
 const u = Astro.locals.user!;
@@ -8,6 +9,9 @@ const id = Number(Astro.params.id);
 if (!Number.isInteger(id)) return Astro.redirect('/pedidos');
 
 let erro = '';
+const sp = Astro.url.searchParams;
+const ok = sp.get('ok');
+const emailFlag = sp.get('email');
 
 let pedido = await db()
   .prepare(
@@ -125,14 +129,50 @@ if (Astro.request.method === 'POST') {
     }
 
     if (!erro) {
+      const statusAnterior = String(pedido.status);
       await db()
         .prepare("UPDATE loja_pedidos SET status = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
         .bind(novoStatus, id, u.empresaId)
         .run();
-      return Astro.redirect('/pedidos?ok=status');
+
+      const resEmail = await enviarEmailStatusPedido({
+        empresaId: u.empresaId,
+        empresaCodigo: u.empresaCodigo,
+        empresaNome: u.empresaNome,
+        pedidoId: id,
+        clienteNome: String(pedido.cliente_nome ?? 'Cliente'),
+        clienteEmail: String(pedido.cliente_email ?? ''),
+        statusAnterior,
+        statusNovo: novoStatus,
+        valorTotal: Number(pedido.valor_total ?? 0),
+        valorDesconto: Number(pedido.valor_desconto ?? 0),
+        itens: itens.map((it) => ({
+          codigo: it.codigo,
+          produto_nome: it.produto_nome,
+          quantidade: Number(it.quantidade),
+          unidade: it.unidade,
+          preco_unitario: Number(it.preco_unitario),
+          subtotal: Number(it.subtotal),
+        })),
+        urlBase: Astro.url.origin,
+      });
+
+      return Astro.redirect(
+        `/pedidos/${id}?ok=status&email=${resEmail.enviado ? 'enviado' : 'sem_email'}`,
+      );
     }
   }
 }
+
+const { results: emailsEnviados } = await db()
+  .prepare(
+    `SELECT id, destinatario, assunto, corpo_html, corpo_texto, status_anterior, status_novo, status_envio, detalhe, criado_em
+       FROM email_notificacoes
+      WHERE empresa_id = ? AND pedido_id = ?
+      ORDER BY id DESC`,
+  )
+  .bind(u.empresaId, id)
+  .all<any>();
 
 const enderecoCompleto = [
   [pedido.logradouro, pedido.numero].filter(Boolean).join(', '),
@@ -153,6 +193,17 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
     <a class="btn sec" href="/pedidos">← Voltar para pedidos</a>
   </div>
   {erro && <div class="msg err">{erro}</div>}
+  {ok === 'status' && emailFlag === 'enviado' && (
+    <div class="msg ok">
+      ✅ Situação do pedido atualizada e <strong>e-mail de notificação enviado</strong> para{' '}
+      <strong>{pedido.cliente_email}</strong>!
+    </div>
+  )}
+  {ok === 'status' && emailFlag === 'sem_email' && (
+    <div class="msg err" style="background:#fef3c7;color:#92400e;border-color:#fde68a">
+      ⚠️ Situação do pedido atualizada, porém o cliente <strong>{pedido.cliente_nome}</strong> não possui um endereço de e-mail válido cadastrado para receber a notificação.
+    </div>
+  )}
 
   <div class="grid">
     <div class="card c8">
@@ -251,5 +302,73 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
         <span class="muted">Total do Pedido:</span> <strong>{formatMoney(pedido.valor_total)}</strong>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin:0">Notificações por E-mail Enviadas ao Cliente</h2>
+      <span class="spacer"></span>
+      <span class="muted" style="font-size:12px">
+        Destinatário: <strong>{pedido.cliente_email || 'Sem e-mail cadastrado'}</strong>
+      </span>
+    </div>
+    {emailsEnviados.length === 0 ? (
+      <p class="muted" style="margin:0;font-size:13px">
+        Nenhuma alteração de status notificada por e-mail ainda para este pedido. Sempre que você alterar a situação do pedido acima, o cliente receberá um e-mail automático.
+      </p>
+    ) : (
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data / Hora</th>
+              <th>Para</th>
+              <th>Mudança de Situação</th>
+              <th>Assunto</th>
+              <th>Status do Envio</th>
+              <th>Visualizar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {emailsEnviados.map((em) => {
+              const stAnt = STATUS_PEDIDO_INFO[em.status_anterior]?.titulo ?? em.status_anterior;
+              const stNov = STATUS_PEDIDO_INFO[em.status_novo]?.titulo ?? em.status_novo;
+              return (
+                <tr>
+                  <td class="muted" style="white-space:nowrap">{em.criado_em}</td>
+                  <td>{em.destinatario}</td>
+                  <td>
+                    <span class="tag off">{stAnt}</span> → <span class="tag">{stNov}</span>
+                  </td>
+                  <td>{em.assunto}</td>
+                  <td>
+                    {em.status_envio === 'ENVIADO' ? (
+                      <span class="tag" style="background:#dcfce7;color:#166534" title={em.detalhe}>
+                        Enviado
+                      </span>
+                    ) : (
+                      <span class="tag off" title={em.detalhe}>
+                        {em.status_envio}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <details>
+                      <summary style="cursor:pointer;color:var(--pri);font-weight:600;font-size:12px">
+                        Ver e-mail
+                      </summary>
+                      <div style="margin-top:8px;padding:10px;background:#f8fafc;border:1px solid var(--bd);border-radius:6px;max-width:460px">
+                        <div class="muted" style="font-size:11px;margin-bottom:6px">{em.detalhe}</div>
+                        <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;margin:0;color:#1e293b">{em.corpo_texto}</pre>
+                      </div>
+                    </details>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
   </div>
 </Layout>

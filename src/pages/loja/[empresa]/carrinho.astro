@@ -51,9 +51,12 @@ if (Astro.request.method === 'POST') {
     const obs = str(f, 'observacoes', 1000);
     const { results: cartItens } = await db()
       .prepare(
-        `SELECT c.produto_id, c.quantidade, p.nome, p.preco_venda, p.preco_custo, p.estoque_atual
+        `SELECT c.produto_id, c.quantidade, p.nome,
+                COALESCE(o.preco_oferta, p.preco_venda) AS preco_venda,
+                p.preco_custo, p.estoque_atual
            FROM loja_carrinho c
            JOIN produtos p ON p.id = c.produto_id AND p.empresa_id = c.empresa_id
+           LEFT JOIN loja_ofertas o ON o.produto_id = p.id AND o.empresa_id = p.empresa_id AND o.ativa = 1
           WHERE c.empresa_id = ? AND c.parceiro_id = ?`,
       )
       .bind(empresa.id, cliente.id)
@@ -133,9 +136,12 @@ if (Astro.request.method === 'POST') {
 
 const { results: itens } = await db()
   .prepare(
-    `SELECT c.produto_id, c.quantidade, p.nome, p.unidade, p.preco_venda, p.estoque_atual, p.foto
+    `SELECT c.produto_id, c.quantidade, p.nome, p.unidade,
+            COALESCE(o.preco_oferta, p.preco_venda) AS preco_venda,
+            p.estoque_atual, p.foto
        FROM loja_carrinho c
        JOIN produtos p ON p.id = c.produto_id AND p.empresa_id = c.empresa_id
+       LEFT JOIN loja_ofertas o ON o.produto_id = p.id AND o.empresa_id = p.empresa_id AND o.ativa = 1
       WHERE c.empresa_id = ? AND c.parceiro_id = ?
       ORDER BY c.id ASC`,
   )

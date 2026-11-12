@@ -1,0 +1,380 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatMoney, formatQty, parseNum, str } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+let erro = '';
+let ok = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? '');
+
+  if (acao === 'adicionar') {
+    const produtoId = Number(f.get('produto_id')) || 0;
+    const tituloOferta = str(f, 'titulo_oferta', 60);
+    const ordem = Number(f.get('ordem')) || 0;
+
+    const prod = await db()
+      .prepare('SELECT id, nome, preco_venda FROM produtos WHERE id = ? AND empresa_id = ?')
+      .bind(produtoId, u.empresaId)
+      .first<{ id: number; nome: string; preco_venda: number }>();
+
+    if (!prod) {
+      erro = 'Selecione um produto válido.';
+    } else {
+      const precoInformado = parseNum(f.get('preco_oferta'), -1);
+      const precoOferta = precoInformado >= 0 ? precoInformado : Number(prod.preco_venda);
+
+      await db()
+        .prepare(
+          `INSERT INTO loja_ofertas (empresa_id, produto_id, titulo_oferta, preco_oferta, ordem, ativa)
+           VALUES (?, ?, ?, ?, ?, 1)
+           ON CONFLICT (empresa_id, produto_id)
+           DO UPDATE SET titulo_oferta = excluded.titulo_oferta,
+                         preco_oferta = excluded.preco_oferta,
+                         ordem = excluded.ordem,
+                         ativa = 1`,
+        )
+        .bind(u.empresaId, prod.id, tituloOferta || null, precoOferta, ordem)
+        .run();
+
+      ok = `Produto "${prod.nome}" incluído no carrossel de ofertas da loja!`;
+    }
+  } else if (acao === 'adicionar_lote') {
+    const ids = f.getAll('produtos_ids').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
+    const descPerc = Math.max(0, Math.min(90, parseNum(f.get('desconto_perc'), 0)));
+    const seloPadrao = str(f, 'titulo_lote', 60);
+
+    if (ids.length === 0) {
+      erro = 'Marque ao menos um produto para incluir nas ofertas.';
+    } else {
+      let count = 0;
+      for (const pid of ids) {
+        const pr = await db()
+          .prepare('SELECT id, preco_venda FROM produtos WHERE id = ? AND empresa_id = ?')
+          .bind(pid, u.empresaId)
+          .first<{ id: number; preco_venda: number }>();
+        if (!pr) continue;
+        const precoCalc =
+          descPerc > 0
+            ? Math.round(Number(pr.preco_venda) * (1 - descPerc / 100) * 100) / 100
+            : Number(pr.preco_venda);
+
+        await db()
+          .prepare(
+            `INSERT INTO loja_ofertas (empresa_id, produto_id, titulo_oferta, preco_oferta, ordem, ativa)
+             VALUES (?, ?, ?, ?, 0, 1)
+             ON CONFLICT (empresa_id, produto_id)
+             DO UPDATE SET titulo_oferta = COALESCE(excluded.titulo_oferta, loja_ofertas.titulo_oferta),
+                           preco_oferta = excluded.preco_oferta,
+                           ativa = 1`,
+          )
+          .bind(u.empresaId, pr.id, seloPadrao || null, precoCalc)
+          .run();
+        count++;
+      }
+      ok = `${count} produto(s) adicionado(s) ao carrossel de ofertas!`;
+    }
+  } else if (acao === 'atualizar') {
+    const ofertaId = Number(f.get('oferta_id')) || 0;
+    const tituloOferta = str(f, 'titulo_oferta', 60);
+    const precoOferta = Math.max(0, parseNum(f.get('preco_oferta'), 0));
+    const ordem = Number(f.get('ordem')) || 0;
+    const ativa = f.get('ativa') ? 1 : 0;
+
+    await db()
+      .prepare(
+        `UPDATE loja_ofertas
+            SET titulo_oferta = ?, preco_oferta = ?, ordem = ?, ativa = ?
+          WHERE id = ? AND empresa_id = ?`,
+      )
+      .bind(tituloOferta || null, precoOferta, ordem, ativa, ofertaId, u.empresaId)
+      .run();
+    ok = 'Oferta atualizada com sucesso!';
+  } else if (acao === 'remover') {
+    const ofertaId = Number(f.get('oferta_id')) || 0;
+    await db()
+      .prepare('DELETE FROM loja_ofertas WHERE id = ? AND empresa_id = ?')
+      .bind(ofertaId, u.empresaId)
+      .run();
+    ok = 'Produto removido do carrossel de ofertas.';
+  }
+}
+
+const { results: ofertas } = await db()
+  .prepare(
+    `SELECT o.id, o.produto_id, o.titulo_oferta, o.preco_oferta, o.ordem, o.ativa, o.criado_em,
+            p.codigo, p.nome, p.categoria, p.unidade, p.preco_venda, p.estoque_atual, p.foto, p.ativo AS prod_ativo
+       FROM loja_ofertas o
+       JOIN produtos p ON p.id = o.produto_id AND p.empresa_id = o.empresa_id
+      WHERE o.empresa_id = ?
+      ORDER BY o.ordem ASC, o.id DESC`,
+  )
+  .bind(u.empresaId)
+  .all<any>();
+
+const idsEmOferta = new Set(ofertas.map((o) => Number(o.produto_id)));
+
+const { results: todosProdutos } = await db()
+  .prepare(
+    `SELECT id, codigo, nome, categoria, unidade, preco_venda, estoque_atual, foto
+       FROM produtos
+      WHERE empresa_id = ? AND ativo = 1
+      ORDER BY nome COLLATE NOCASE`,
+  )
+  .bind(u.empresaId)
+  .all<any>();
+
+const urlLoja = `/loja/${u.empresaCodigo}`;
+---
+<Layout title="Ofertas da Loja" active="ofertas">
+  <div class="row">
+    <h1>Ofertas em Destaque (Carrossel da Loja)</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href={urlLoja} target="_blank">🛒 Ver carrossel na loja ({urlLoja}) ↗</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">{ok}</div>}
+
+  <div class="grid">
+    <div class="card c6">
+      <h2>+ Incluir Produto em Oferta</h2>
+      <form method="post" id="form-oferta-unica">
+        <input type="hidden" name="_acao" value="adicionar" />
+        <div class="grid">
+          <div class="c12">
+            <label>Produto *</label>
+            <select name="produto_id" id="sel-prod-oferta" required>
+              <option value="">Selecione um produto...</option>
+              {todosProdutos.map((p) => (
+                <option value={p.id} data-preco={p.preco_venda}>
+                  {p.nome} — Preço atual: {formatMoney(p.preco_venda)} (Estoque: {formatQty(p.estoque_atual)} {p.unidade})
+                  {idsEmOferta.has(Number(p.id)) ? ' ★ JÁ EM OFERTA' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div class="c4">
+            <label>Preço na oferta (R$) *</label>
+            <input
+              name="preco_oferta"
+              id="inp-preco-oferta"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0,00"
+              required
+            />
+          </div>
+          <div class="c5">
+            <label>Selo / Chamada (opcional)</label>
+            <input name="titulo_oferta" placeholder="Ex: OFERTA DO DIA, PROMOÇÃO" />
+          </div>
+          <div class="c3">
+            <label>Ordem</label>
+            <input name="ordem" type="number" value="0" />
+          </div>
+          <div class="c12">
+            <button style="width:100%">Adicionar ao Carrossel de Ofertas</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="card c6">
+      <h2>⚡ Seleção Rápida de Vários Produtos</h2>
+      <form method="post">
+        <input type="hidden" name="_acao" value="adicionar_lote" />
+        <div class="grid">
+          <div class="c12">
+            <label>Marque os produtos para exibir no carrossel</label>
+            <div style="max-height:118px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;padding:8px;background:#f9fafb">
+              {todosProdutos.length === 0 ? (
+                <div class="muted" style="font-size:13px">Nenhum produto ativo cadastrado.</div>
+              ) : (
+                todosProdutos.map((p) => (
+                  <label class="check" style="font-size:13px;margin-bottom:4px">
+                    <input type="checkbox" name="produtos_ids" value={p.id} checked={idsEmOferta.has(Number(p.id))} />
+                    <span>
+                      <strong>{p.nome}</strong> — {formatMoney(p.preco_venda)}{' '}
+                      <span class="muted">(Estoque: {formatQty(p.estoque_atual)} {p.unidade})</span>
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+          <div class="c6">
+            <label>Aplicar desconto (%) opcional</label>
+            <input name="desconto_perc" type="number" step="0.5" min="0" max="90" value="0" placeholder="0%" />
+          </div>
+          <div class="c6">
+            <label>Selo padrão (opcional)</label>
+            <input name="titulo_lote" placeholder="Ex: DESTAQUE" />
+          </div>
+          <div class="c12">
+            <button style="width:100%" class="btn sec">Incluir / Atualizar Selecionados</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:10px">
+      <h2 style="margin:0">Produtos no Carrossel de Ofertas ({ofertas.length})</h2>
+      <span class="spacer"></span>
+      <span class="muted" style="font-size:12px">
+        Apenas ofertas ativas com estoque disponível (≥ 1) aparecem no carrossel da loja.
+      </span>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Produto</th>
+            <th>Estoque</th>
+            <th>Preço Original</th>
+            <th>Preço em Oferta (R$)</th>
+            <th>Selo / Chamada</th>
+            <th>Ordem</th>
+            <th>Ativa</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ofertas.length === 0 && (
+            <tr>
+              <td colspan="8" class="muted">
+                Nenhuma oferta cadastrada ainda. Selecione os produtos acima para destacá-los no carrossel da loja!
+              </td>
+            </tr>
+          )}
+          {ofertas.map((o) => {
+            const desc =
+              o.preco_venda > 0 && o.preco_oferta < o.preco_venda
+                ? Math.round(((o.preco_venda - o.preco_oferta) / o.preco_venda) * 100)
+                : 0;
+            const formId = `f-of-${o.id}`;
+            return (
+              <tr>
+                <td>
+                  <div class="row" style="gap:10px;flex-wrap:nowrap">
+                    {o.foto ? (
+                      <img
+                        src={o.foto}
+                        alt={o.nome}
+                        style="width:38px;height:38px;object-fit:contain;border-radius:8px;border:1px solid var(--bd);background:#fff;flex-shrink:0"
+                      />
+                    ) : (
+                      <div style="width:38px;height:38px;border-radius:8px;background:#f1f5f9;display:grid;place-items:center;font-size:18px;flex-shrink:0">
+                        📦
+                      </div>
+                    )}
+                    <div>
+                      <a href={`/produtos/${o.produto_id}`}><strong>{o.nome}</strong></a>
+                      <div class="muted" style="font-size:12px">
+                        {o.codigo ? `Cód. ${o.codigo} · ` : ''}{o.categoria || 'Geral'}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  {o.estoque_atual >= 1 ? (
+                    <span class="tag" style="background:#dcfce7;color:#166534">
+                      {formatQty(o.estoque_atual)} {o.unidade}
+                    </span>
+                  ) : (
+                    <span class="tag off">Sem estoque (0)</span>
+                  )}
+                </td>
+                <td>
+                  <span class="muted">{formatMoney(o.preco_venda)}</span>
+                  {desc > 0 && (
+                    <div>
+                      <span class="tag" style="background:#dcfce7;color:#166534;font-weight:700">
+                        {desc}% OFF
+                      </span>
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <form id={formId} method="post" style="margin:0">
+                    <input type="hidden" name="_acao" value="atualizar" />
+                    <input type="hidden" name="oferta_id" value={o.id} />
+                  </form>
+                  <input
+                    form={formId}
+                    name="preco_oferta"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={o.preco_oferta}
+                    style="width:110px"
+                  />
+                </td>
+                <td>
+                  <input
+                    form={formId}
+                    name="titulo_oferta"
+                    value={o.titulo_oferta ?? ''}
+                    placeholder="OFERTA"
+                    style="width:145px"
+                  />
+                </td>
+                <td>
+                  <input
+                    form={formId}
+                    name="ordem"
+                    type="number"
+                    value={o.ordem}
+                    style="width:68px"
+                  />
+                </td>
+                <td>
+                  <label class="check">
+                    <input form={formId} type="checkbox" name="ativa" value="1" checked={!!o.ativa} />
+                  </label>
+                </td>
+                <td>
+                  <div class="row" style="gap:6px;flex-wrap:nowrap">
+                    <button form={formId} class="btn sec" style="padding:6px 10px;font-size:13px">
+                      Salvar
+                    </button>
+                    <form method="post" style="margin:0">
+                      <input type="hidden" name="_acao" value="remover" />
+                      <input type="hidden" name="oferta_id" value={o.id} />
+                      <button
+                        class="btn dg"
+                        style="padding:6px 10px;font-size:13px"
+                        title="Remover da lista de ofertas"
+                      >
+                        ✕
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</Layout>
+
+<script is:inline>
+  const selProd = document.getElementById('sel-prod-oferta');
+  const inpPreco = document.getElementById('inp-preco-oferta');
+  selProd?.addEventListener('change', () => {
+    const opt = selProd.options[selProd.selectedIndex];
+    const preco = opt ? opt.getAttribute('data-preco') : '';
+    if (preco && inpPreco) {
+      inpPreco.value = Number(preco).toFixed(2);
+    }
+  });
+</script>

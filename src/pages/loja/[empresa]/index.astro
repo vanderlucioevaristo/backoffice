@@ -66,28 +66,59 @@ const { results: categoriasRows } = await db()
   .bind(empresa.id)
   .all<{ categoria: string; qtd: number }>();
 
-const where = ['empresa_id = ?', 'ativo = 1', 'estoque_atual >= 1'];
+const where = ['p.empresa_id = ?', 'p.ativo = 1', 'p.estoque_atual >= 1'];
 const args: unknown[] = [empresa.id];
 
 if (cat) {
   if (cat === 'Geral') {
-    where.push("(categoria IS NULL OR TRIM(categoria) = '' OR categoria = 'Geral')");
+    where.push("(p.categoria IS NULL OR TRIM(p.categoria) = '' OR p.categoria = 'Geral')");
   } else {
-    where.push('categoria = ?');
+    where.push('p.categoria = ?');
     args.push(cat);
   }
 }
 if (q) {
-  where.push('(nome LIKE ? OR descricao LIKE ? OR marca LIKE ? OR codigo LIKE ?)');
+  where.push('(p.nome LIKE ? OR p.descricao LIKE ? OR p.marca LIKE ? OR p.codigo LIKE ?)');
   args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
 }
 
+// Ofertas ativas para o carrossel da loja (somente produtos com estoque >= 1)
+const { results: ofertas } = await db()
+  .prepare(
+    `SELECT o.id AS oferta_id, o.titulo_oferta, o.preco_oferta,
+            p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.unidade,
+            p.preco_venda, p.estoque_atual, p.foto
+       FROM loja_ofertas o
+       JOIN produtos p ON p.id = o.produto_id AND p.empresa_id = o.empresa_id
+      WHERE o.empresa_id = ? AND o.ativa = 1 AND p.ativo = 1 AND p.estoque_atual >= 1
+      ORDER BY o.ordem ASC, o.id DESC`,
+  )
+  .bind(empresa.id)
+  .all<{
+    oferta_id: number;
+    titulo_oferta: string | null;
+    preco_oferta: number;
+    id: number;
+    codigo: string | null;
+    nome: string;
+    descricao: string | null;
+    categoria: string | null;
+    marca: string | null;
+    unidade: string;
+    preco_venda: number;
+    estoque_atual: number;
+    foto: string | null;
+  }>();
+
 const { results: produtos } = await db()
   .prepare(
-    `SELECT id, codigo, nome, descricao, categoria, marca, unidade, preco_venda, estoque_atual, foto
-       FROM produtos
+    `SELECT p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.unidade,
+            p.preco_venda, p.estoque_atual, p.foto,
+            o.preco_oferta, o.titulo_oferta
+       FROM produtos p
+       LEFT JOIN loja_ofertas o ON o.produto_id = p.id AND o.empresa_id = p.empresa_id AND o.ativa = 1
       WHERE ${where.join(' AND ')}
-      ORDER BY nome COLLATE NOCASE`,
+      ORDER BY p.nome COLLATE NOCASE`,
   )
   .bind(...args)
   .all<{
@@ -101,6 +132,8 @@ const { results: produtos } = await db()
     preco_venda: number;
     estoque_atual: number;
     foto: string | null;
+    preco_oferta: number | null;
+    titulo_oferta: string | null;
   }>();
 
 const countCart = await db()
@@ -137,6 +170,78 @@ const baseUrl = `/loja/${empCodigo}`;
     {(q || cat) && <a class="btn sec" href={baseUrl} style="font-size:13px;padding:5px 10px">Limpar filtros</a>}
   </div>
 
+  {ofertas.length > 0 && (
+    <section class="ofertas-section" aria-label="Carrossel de Ofertas">
+      <div class="ofertas-header">
+        <div class="ofertas-title">
+          <span class="ofertas-pill">🔥 Ofertas</span>
+          <span>Destaques selecionados para você</span>
+          <span class="muted" style="font-size:12px;font-weight:400">
+            (clique em uma oferta para abrir e adicionar ao carrinho)
+          </span>
+        </div>
+        <div class="ofertas-nav">
+          <button type="button" class="ofertas-btn" id="of-prev" title="Oferta anterior">‹</button>
+          <button type="button" class="ofertas-btn" id="of-next" title="Próxima oferta">›</button>
+        </div>
+      </div>
+
+      <div class="ofertas-track" id="ofertas-track">
+        {ofertas.map((of) => {
+          const temDesconto = of.preco_venda > 0 && of.preco_oferta < of.preco_venda;
+          const percOff = temDesconto
+            ? Math.round(((of.preco_venda - of.preco_oferta) / of.preco_venda) * 100)
+            : 0;
+          return (
+            <div
+              class="oferta-slide prod-mini"
+              tabindex="0"
+              role="button"
+              data-id={of.id}
+              data-codigo={of.codigo || ''}
+              data-nome={of.nome}
+              data-desc={of.descricao || ''}
+              data-cat={[of.categoria || 'Geral', of.marca].filter(Boolean).join(' · ')}
+              data-preco={formatMoney(of.preco_oferta)}
+              data-preco-antigo={temDesconto ? formatMoney(of.preco_venda) : ''}
+              data-selo={of.titulo_oferta || 'OFERTA'}
+              data-est={of.estoque_atual}
+              data-est-fmt={`${formatQty(of.estoque_atual)} ${of.unidade}`}
+              data-foto={of.foto || ''}
+              title="Clique para abrir a oferta e colocar no carrinho"
+            >
+              <div class="oferta-top-badges">
+                <span class="oferta-tag">🔥 {of.titulo_oferta || 'Oferta Especial'}</span>
+                {percOff > 0 && <span class="oferta-off">{percOff}% OFF</span>}
+              </div>
+
+              <div class="oferta-thumb">
+                {of.foto ? <img src={of.foto} alt={of.nome} loading="lazy" /> : <div class="ml-no-img">📦</div>}
+              </div>
+
+              <div>
+                <div class="oferta-old-price">
+                  {temDesconto ? `De ${formatMoney(of.preco_venda)}` : '\u00A0'}
+                </div>
+                <div class="oferta-new-price">{formatMoney(of.preco_oferta)}</div>
+                <div class="ml-stock-badge" style="margin-top:2px">
+                  Quantidade disponível: {formatQty(of.estoque_atual)} {of.unidade}
+                </div>
+              </div>
+
+              <div class="ml-title" style="font-weight:500">{of.nome}</div>
+
+              <div class="oferta-cta">
+                <span>Comprar oferta</span>
+                <span>🛒 →</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  )}
+
   <div class="ml-cat-bar">
     <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>Todas </a>
     {categoriasRows.map((c) => (
@@ -153,34 +258,45 @@ const baseUrl = `/loja/${empCodigo}`;
     <div class="card muted">Nenhum produto disponível em estoque para esta seleção no momento.</div>
   ) : (
     <div class="prod-grid">
-      {produtos.map((p) => (
-        <div
-          class="ml-card prod-mini"
-          tabindex="0"
-          role="button"
-          data-id={p.id}
-          data-codigo={p.codigo || ''}
-          data-nome={p.nome}
-          data-desc={p.descricao || ''}
-          data-cat={[p.categoria || 'Geral', p.marca].filter(Boolean).join(' · ')}
-          data-preco={formatMoney(p.preco_venda)}
-          data-est={p.estoque_atual}
-          data-est-fmt={`${formatQty(p.estoque_atual)} ${p.unidade}`}
-          data-foto={p.foto || ''}
-          title="Clique para expandir e adicionar ao carrinho"
-        >
-          <div class="ml-card-thumb">
-            {p.foto ? <img src={p.foto} alt={p.nome} loading="lazy" /> : <div class="ml-no-img">📦</div>}
-          </div>
-          <div class="ml-card-body">
-            <div class="ml-price">{formatMoney(p.preco_venda)}</div>
-            <div class="ml-stock-badge">
-              Quantidade disponível: {formatQty(p.estoque_atual)} {p.unidade}
+      {produtos.map((p) => {
+        const precoFinal = p.preco_oferta !== null && p.preco_oferta !== undefined ? p.preco_oferta : p.preco_venda;
+        const temDesc = p.preco_oferta !== null && p.preco_oferta !== undefined && p.preco_oferta < p.preco_venda;
+        return (
+          <div
+            class="ml-card prod-mini"
+            tabindex="0"
+            role="button"
+            data-id={p.id}
+            data-codigo={p.codigo || ''}
+            data-nome={p.nome}
+            data-desc={p.descricao || ''}
+            data-cat={[p.categoria || 'Geral', p.marca].filter(Boolean).join(' · ')}
+            data-preco={formatMoney(precoFinal)}
+            data-preco-antigo={temDesc ? formatMoney(p.preco_venda) : ''}
+            data-selo={p.titulo_oferta || ''}
+            data-est={p.estoque_atual}
+            data-est-fmt={`${formatQty(p.estoque_atual)} ${p.unidade}`}
+            data-foto={p.foto || ''}
+            title="Clique para expandir e adicionar ao carrinho"
+          >
+            <div class="ml-card-thumb">
+              {p.foto ? <img src={p.foto} alt={p.nome} loading="lazy" /> : <div class="ml-no-img">📦</div>}
             </div>
-            <div class="ml-title">{p.nome}</div>
+            <div class="ml-card-body">
+              {temDesc && (
+                <div style="font-size:11px;color:#94a3b8;text-decoration:line-through">
+                  {formatMoney(p.preco_venda)}
+                </div>
+              )}
+              <div class="ml-price">{formatMoney(precoFinal)}</div>
+              <div class="ml-stock-badge">
+                Quantidade disponível: {formatQty(p.estoque_atual)} {p.unidade}
+              </div>
+              <div class="ml-title">{p.nome}</div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   )}
 
@@ -198,6 +314,7 @@ const baseUrl = `/loja/${empCodigo}`;
         <div style="flex:1;min-width:180px">
           <div id="m-cat" class="muted" style="font-size:12px"></div>
           <h2 id="m-nome" style="margin:2px 0 6px;font-size:18px;font-weight:600"></h2>
+          <div id="m-preco-antigo" style="font-size:13px;color:#94a3b8;text-decoration:line-through;display:none"></div>
           <div id="m-preco" style="font-size:26px;font-weight:400;color:#111"></div>
           <div style="font-size:13px;margin-top:4px;color:#00a650;font-weight:600">
             ✓ Quantidade disponível: <span id="m-est"></span>
@@ -230,6 +347,7 @@ const baseUrl = `/loja/${empCodigo}`;
   const mPlaceholder = document.getElementById('m-placeholder');
   const mCat = document.getElementById('m-cat');
   const mNome = document.getElementById('m-nome');
+  const mPrecoAntigo = document.getElementById('m-preco-antigo');
   const mPreco = document.getElementById('m-preco');
   const mEst = document.getElementById('m-est');
   const mDesc = document.getElementById('m-desc');
@@ -240,6 +358,14 @@ const baseUrl = `/loja/${empCodigo}`;
     mId.value = d.id;
     mCat.textContent = d.codigo ? `${d.cat} · Cód. ${d.codigo}` : d.cat;
     mNome.textContent = d.nome;
+    if (mPrecoAntigo) {
+      if (d.precoAntigo) {
+        mPrecoAntigo.textContent = 'De ' + d.precoAntigo;
+        mPrecoAntigo.style.display = 'block';
+      } else {
+        mPrecoAntigo.style.display = 'none';
+      }
+    }
     mPreco.textContent = d.preco;
     mEst.textContent = d.estFmt;
     if (d.desc) {
@@ -272,6 +398,32 @@ const baseUrl = `/loja/${empCodigo}`;
       }
     });
   });
+
+  // Navegação e rotação automática do carrossel de ofertas
+  const track = document.getElementById('ofertas-track');
+  const btnPrev = document.getElementById('of-prev');
+  const btnNext = document.getElementById('of-next');
+  if (track) {
+    const step = 185;
+    btnPrev?.addEventListener('click', () => {
+      track.scrollBy({ left: -step, behavior: 'smooth' });
+    });
+    btnNext?.addEventListener('click', () => {
+      if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 10) {
+        track.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        track.scrollBy({ left: step, behavior: 'smooth' });
+      }
+    });
+    let autoTimer = setInterval(() => {
+      if (track.matches(':hover')) return;
+      if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 10) {
+        track.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        track.scrollBy({ left: step, behavior: 'smooth' });
+      }
+    }, 4500);
+  }
 
   btnFechar?.addEventListener('click', () => dlg.close());
   dlg?.addEventListener('click', (e) => {

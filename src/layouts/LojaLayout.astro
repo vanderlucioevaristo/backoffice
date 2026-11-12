@@ -308,6 +308,163 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         font-weight: 600;
       }
 
+      /* Carrossel de Ofertas em Destaque */
+      .ofertas-section {
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        border: 1px solid rgba(0,0,0,.08);
+        border-radius: 14px;
+        padding: 10px 14px 12px;
+        margin-bottom: 14px;
+        box-shadow: 0 2px 6px rgba(0,0,0,.05);
+        position: relative;
+      }
+      .ofertas-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        gap: 8px;
+      }
+      .ofertas-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        font-weight: 700;
+        color: #111;
+      }
+      .ofertas-pill {
+        background: #ef4444;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 800;
+        padding: 1px 7px;
+        border-radius: 99px;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+      }
+      .ofertas-nav {
+        display: flex;
+        gap: 5px;
+      }
+      .ofertas-btn {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #1e293b;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        box-shadow: 0 1px 2px rgba(0,0,0,.06);
+      }
+      .ofertas-btn:hover {
+        background: var(--pr);
+        border-color: var(--pr);
+        color: #fff;
+      }
+      .ofertas-track {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        scroll-behavior: smooth;
+        scroll-snap-type: x mandatory;
+        padding: 2px 2px 4px;
+        scrollbar-width: none;
+      }
+      .ofertas-track::-webkit-scrollbar {
+        display: none;
+      }
+      .oferta-slide {
+        flex: 0 0 175px;
+        scroll-snap-align: start;
+        background: #fff;
+        border: 1.5px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 8px 10px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+        position: relative;
+      }
+      .oferta-slide:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 14px rgba(0,0,0,.12);
+        border-color: var(--pr);
+      }
+      .oferta-top-badges {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+      }
+      .oferta-tag {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+        font-size: 9.5px;
+        font-weight: 800;
+        padding: 1px 6px;
+        border-radius: 99px;
+        text-transform: uppercase;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .oferta-off {
+        background: #00a650;
+        color: #fff;
+        font-size: 9.5px;
+        font-weight: 800;
+        padding: 1px 6px;
+        border-radius: 99px;
+        white-space: nowrap;
+      }
+      .oferta-thumb {
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        border-bottom: 1px solid #f1f5f9;
+        padding-bottom: 4px;
+      }
+      .oferta-thumb img {
+        max-width: 50px;
+        max-height: 50px;
+        object-fit: contain;
+        border-radius: 8px;
+      }
+      .oferta-old-price {
+        font-size: 11px;
+        color: #94a3b8;
+        text-decoration: line-through;
+        min-height: 14px;
+        line-height: 1.1;
+      }
+      .oferta-new-price {
+        font-size: 16px;
+        font-weight: 700;
+        color: #111;
+        line-height: 1.1;
+      }
+      .oferta-cta {
+        margin-top: auto;
+        padding-top: 3px;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--pr);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
       /* Rodapé personalizável da loja */
       .ml-footer {
         margin-top: auto;

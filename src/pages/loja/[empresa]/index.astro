@@ -110,33 +110,39 @@ const countCart = await db()
 
 const baseUrl = `/loja/${empCodigo}`;
 ---
-<LojaLayout title="Catálogo de Produtos" empresa={empresa} cliente={cliente} qtdCarrinho={Number(countCart?.n ?? 0)}>
+<LojaLayout
+  title="Catálogo de Produtos"
+  empresa={empresa}
+  cliente={cliente}
+  qtdCarrinho={Number(countCart?.n ?? 0)}
+  busca={q}
+  catAtiva={cat}
+  categorias={categoriasRows}
+>
   {msgOk && (
     <div class="msg ok row">
       <span>{msgOk}</span>
       <span class="spacer"></span>
-      <a href={`${baseUrl}/carrinho`} style="font-weight:700">Ver carrinho →</a>
+      <a href={`${baseUrl}/carrinho`} style="font-weight:700">Ir para o carrinho →</a>
     </div>
   )}
   {msgErro && <div class="msg err">{msgErro}</div>}
 
-  <div class="row" style="margin-bottom:14px">
-    <h1 style="margin:0">Produtos disponíveis</h1>
+  <div class="row" style="margin-bottom:12px">
+    <div style="font-size:18px;font-weight:600">
+      {cat ? `Categoria: ${cat}` : 'Ofertas e Produtos em Estoque'}
+      <span class="muted" style="font-size:13px;font-weight:400"> ({produtos.length} resultado{produtos.length === 1 ? '' : 's'})</span>
+    </div>
     <span class="spacer"></span>
-    <form method="get" class="row" style="margin:0">
-      {cat && <input type="hidden" name="cat" value={cat} />}
-      <input name="q" value={q} placeholder="Buscar produto ou marca..." style="width:240px" />
-      <button>Buscar</button>
-      {(q || cat) && <a class="btn sec" href={baseUrl}>Limpar</a>}
-    </form>
+    {(q || cat) && <a class="btn sec" href={baseUrl} style="font-size:13px;padding:5px 10px">Limpar filtros</a>}
   </div>
 
-  <div class="cat-pills">
-    <a href={baseUrl} class={`cat-pill ${!cat ? 'on' : ''}`}>Todas as categorias </a>
+  <div class="ml-cat-bar">
+    <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>Todas</a>
     {categoriasRows.map((c) => (
       <a
         href={`${baseUrl}?cat=${encodeURIComponent(c.categoria)}`}
-        class={`cat-pill ${cat === c.categoria ? 'on' : ''}`}
+        class={`ml-cat-chip ${cat === c.categoria ? 'on' : ''}`}
       >
         {c.categoria} ({c.qtd})
       </a>
@@ -149,7 +155,7 @@ const baseUrl = `/loja/${empCodigo}`;
     <div class="prod-grid">
       {produtos.map((p) => (
         <div
-          class="prod-mini"
+          class="ml-card prod-mini"
           tabindex="0"
           role="button"
           data-id={p.id}
@@ -163,51 +169,53 @@ const baseUrl = `/loja/${empCodigo}`;
           data-foto={p.foto || ''}
           title="Clique para expandir e adicionar ao carrinho"
         >
-          <div class="prod-mini-icon">
-            {p.foto ? <img src={p.foto} alt={p.nome} loading="lazy" /> : <span>📦</span>}
+          <div class="ml-card-thumb">
+            {p.foto ? <img src={p.foto} alt={p.nome} loading="lazy" /> : <div class="ml-no-img">📦</div>}
           </div>
-          <div class="prod-mini-title">{p.nome}</div>
-          <div class="prod-price">{formatMoney(p.preco_venda)}</div>
-          <div class="muted" style="font-size:11px">
-            Quantidade disponível: <strong>{formatQty(p.estoque_atual)} {p.unidade}</strong>
+          <div class="ml-card-body">
+            <div class="ml-price">{formatMoney(p.preco_venda)}</div>
+            <div class="ml-stock-badge">
+              Quantidade disponível: {formatQty(p.estoque_atual)} {p.unidade}
+            </div>
+            <div class="ml-title">{p.nome}</div>
           </div>
         </div>
       ))}
     </div>
   )}
 
-  <dialog id="dlg-prod" class="modal" style="max-width:480px">
+  <dialog id="dlg-prod" class="modal" style="max-width:520px;border:none;border-radius:8px">
     <form method="post" id="form-add-cart">
       <input type="hidden" name="produto_id" id="m-id" />
-      <div class="row" style="align-items:flex-start;gap:14px;margin-bottom:12px">
+      <div class="row" style="align-items:flex-start;gap:16px;margin-bottom:14px">
         <div
           id="m-icon-box"
-          style="width:110px;height:110px;border-radius:10px;border:1px solid var(--bd);background:#f8fafc;display:grid;place-items:center;overflow:hidden;font-size:40px;flex-shrink:0"
+          style="width:88px;height:88px;border-radius:6px;border:1px solid #eee;background:#fff;display:grid;place-items:center;overflow:hidden;font-size:30px;flex-shrink:0;padding:4px"
         >
-          <img id="m-foto" src="" alt="" style="width:100%;height:100%;object-fit:cover;display:none" />
+          <img id="m-foto" src="" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:none" />
           <span id="m-placeholder">📦</span>
         </div>
         <div style="flex:1;min-width:180px">
           <div id="m-cat" class="muted" style="font-size:12px"></div>
-          <h2 id="m-nome" style="margin:2px 0 6px;font-size:19px"></h2>
-          <div id="m-preco" style="font-size:22px;font-weight:700;color:var(--pr)"></div>
-          <div class="muted" style="font-size:12px;margin-top:4px">
-            Quantidade disponível: <strong id="m-est"></strong>
+          <h2 id="m-nome" style="margin:2px 0 6px;font-size:18px;font-weight:600"></h2>
+          <div id="m-preco" style="font-size:26px;font-weight:400;color:#111"></div>
+          <div style="font-size:13px;margin-top:4px;color:#00a650;font-weight:600">
+            ✓ Quantidade disponível: <span id="m-est"></span>
           </div>
         </div>
       </div>
 
       <p id="m-desc" class="muted" style="font-size:14px;margin:0 0 14px;display:none"></p>
 
-      <div class="row" style="padding-top:12px;border-top:1px solid var(--bd)">
-        <div style="width:110px">
+      <div class="row" style="padding-top:12px;border-top:1px solid #eee">
+        <div style="width:120px">
           <label for="m-qtd">Quantidade</label>
           <input id="m-qtd" name="quantidade" type="number" min="1" step="1" value="1" required />
         </div>
         <span class="spacer"></span>
         <div class="row" style="margin-top:18px">
           <button type="button" class="btn sec" id="btn-fechar-prod">Fechar</button>
-          <button type="submit">🛒 Colocar no carrinho</button>
+          <button type="submit" style="font-weight:600">🛒 Adicionar ao carrinho</button>
         </div>
       </div>
     </form>

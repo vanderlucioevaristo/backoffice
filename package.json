@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "npm test && astro build",
+    "test": "node --experimental-strip-types --test tests/cadastro-empresa.test.ts",
     "preview": "astro preview",
     "deploy": "astro build && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply backoffice --local --yes",

@@ -250,6 +250,31 @@ export async function ensureSchema(): Promise<void> {
         criado_em TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (empresa_id, produto_id)
       )`,
+      `CREATE TABLE IF NOT EXISTS servicos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        nome TEXT NOT NULL,
+        descricao TEXT,
+        duracao_minutos INTEGER NOT NULL DEFAULT 30 CHECK (duracao_minutos >= 5),
+        preco REAL NOT NULL DEFAULT 0 CHECK (preco >= 0),
+        ativo INTEGER NOT NULL DEFAULT 1,
+        criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS agendamentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        parceiro_id INTEGER NOT NULL REFERENCES parceiros(id) ON DELETE CASCADE,
+        servico_id INTEGER NOT NULL REFERENCES servicos(id) ON DELETE CASCADE,
+        data TEXT NOT NULL,
+        hora_inicio TEXT NOT NULL,
+        hora_fim TEXT NOT NULL,
+        duracao_minutos INTEGER NOT NULL,
+        preco REAL NOT NULL DEFAULT 0,
+        observacoes TEXT,
+        status TEXT NOT NULL DEFAULT 'AGENDADO' CHECK (status IN ('AGENDADO','CONFIRMADO','CONCLUIDO','CANCELADO')),
+        visto_admin INTEGER NOT NULL DEFAULT 0,
+        criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
     ];
 
     for (const sql of tables) {
@@ -285,6 +310,13 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE loja_pedidos ADD COLUMN atualizado_em TEXT",
       "ALTER TABLE loja_ofertas ADD COLUMN inicio_em TEXT",
       "ALTER TABLE loja_ofertas ADD COLUMN fim_em TEXT",
+      "ALTER TABLE empresas ADD COLUMN agenda_ativa INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE empresas ADD COLUMN agenda_menu_texto TEXT NOT NULL DEFAULT 'Agenda'",
+      "ALTER TABLE empresas ADD COLUMN agenda_inicio TEXT NOT NULL DEFAULT '08:00'",
+      "ALTER TABLE empresas ADD COLUMN agenda_fim TEXT NOT NULL DEFAULT '18:00'",
+      "ALTER TABLE empresas ADD COLUMN agenda_intervalo_min INTEGER NOT NULL DEFAULT 30",
+      "ALTER TABLE empresas ADD COLUMN agenda_dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5'",
+      "ALTER TABLE empresas ADD COLUMN agenda_datas_fechadas TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -408,6 +440,13 @@ export type LojaEmpresa = {
   rodape_copyright: string | null;
   rodape_cor_fundo: string;
   rodape_cor_texto: string;
+  agenda_ativa: number;
+  agenda_menu_texto: string;
+  agenda_inicio: string;
+  agenda_fim: string;
+  agenda_intervalo_min: number;
+  agenda_dias_semana: string;
+  agenda_datas_fechadas: string | null;
 };
 
 export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null> {
@@ -418,7 +457,14 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
               rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
               rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
-              rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto
+              rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto,
+              COALESCE(agenda_ativa, 0) AS agenda_ativa,
+              COALESCE(NULLIF(agenda_menu_texto, ''), 'Agenda') AS agenda_menu_texto,
+              COALESCE(agenda_inicio, '08:00') AS agenda_inicio,
+              COALESCE(agenda_fim, '18:00') AS agenda_fim,
+              COALESCE(agenda_intervalo_min, 30) AS agenda_intervalo_min,
+              COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
+              agenda_datas_fechadas
          FROM empresas
         WHERE codigo = ? AND ativa = 1`,
     )

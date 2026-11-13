@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC, db, getLojaEmpresa, getSessionClient } from '../../lib/auth';
+import { DIAS_SEMANA_LABELS } from '../../lib/empresa-service';
 import { STATUS_PEDIDO_INFO } from '../../lib/email';
 import { formatMoney, formatQty } from '../../lib/validate';
 
@@ -95,6 +96,48 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     .bind(empresa.id)
     .all<any>();
 
+  // Carrega serviços disponíveis para agendamento e os agendamentos DO PRÓPRIO cliente logado
+  const { results: servicos } = await db()
+    .prepare(
+      `SELECT id, nome, descricao, duracao_minutos, preco
+         FROM servicos
+        WHERE empresa_id = ? AND ativo = 1
+        ORDER BY nome COLLATE NOCASE`,
+    )
+    .bind(empresa.id)
+    .all<any>();
+
+  let meusAgendamentos: any[] = [];
+  if (cliente) {
+    const { results: ags } = await db()
+      .prepare(
+        `SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco, a.status, a.observacoes,
+                s.nome AS servico_nome
+           FROM agendamentos a
+           JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
+          WHERE a.empresa_id = ? AND a.parceiro_id = ?
+          ORDER BY a.data DESC, a.hora_inicio DESC
+          LIMIT 10`,
+      )
+      .bind(empresa.id, cliente.id)
+      .all<any>();
+    meusAgendamentos = ags;
+  }
+
+  const diasFuncionamento = DIAS_SEMANA_LABELS.filter((d) =>
+    String(empresa.agenda_dias_semana ?? '1,2,3,4,5')
+      .split(',')
+      .map((s) => s.trim())
+      .includes(String(d.valor)),
+  )
+    .map((d) => d.longo)
+    .join(', ');
+
+  function formatDataBr(ymd: string): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd ?? ''));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
+  }
+
   // Se houver chave de IA configurada no ambiente (GEMINI_API_KEY ou OPENAI_API_KEY), usa LLM com o contexto real
   const runtimeEnv = env as unknown as Record<string, string | undefined>;
   const geminiKey = runtimeEnv.GEMINI_API_KEY;
@@ -122,6 +165,26 @@ export const POST: APIRoute = async ({ request, cookies }) => {
               `[${pr.nome}${pr.categoria ? ` (${pr.categoria})` : ''}: ${formatMoney(pr.preco_venda)} — Estoque: ${formatQty(pr.estoque_atual)} ${pr.unidade || 'UN'}${pr.descricao ? ` — ${pr.descricao}` : ''}]`,
           )
           .join('; ')}`,
+        `Agenda de serviços na loja: ${empresa.agenda_ativa === 1 ? `Ativa no menu "${empresa.agenda_menu_texto || 'Agenda'}". Dias de funcionamento: ${diasFuncionamento || 'consulte a loja'}, das ${empresa.agenda_inicio} às ${empresa.agenda_fim}.` : 'Desativada no momento.'}`,
+        `Serviços disponíveis (${servicos.length}): ${
+          servicos.length === 0
+            ? 'Nenhum serviço cadastrado.'
+            : servicos
+                .map((s) => `[${s.nome}: duração ${s.duracao_minutos} min — R$ ${formatMoney(Number(s.preco))}${s.descricao ? ` — ${s.descricao}` : ''}]`)
+                .join('; ')
+        }`,
+        cliente
+          ? `Agendamentos do próprio cliente logado (${cliente.nome}): ${
+              meusAgendamentos.length === 0
+                ? 'Nenhum agendamento marcado.'
+                : meusAgendamentos
+                    .map(
+                      (a) =>
+                        `Agendamento #${a.id} em ${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim} (${a.duracao_minutos} min) - Serviço: ${a.servico_nome} - Status: ${a.status} - Valor: R$ ${formatMoney(Number(a.preco))}`,
+                    )
+                    .join(' | ')
+            }`
+          : '',
       ].join('\n');
 
       const resp = await fetch(
@@ -221,6 +284,56 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     });
   }
 
+  // 2.5. Perguntas sobre agenda, agendamentos, serviços, procedimentos, horários disponíveis ou marcação
+  if (
+    /\b(agenda|agendamento|agendamentos|agendar|agendei|marcar|marcado|servico|servicos|procedimento|procedimentos|consulta|duracao|vaga|vagas|disponibilidade|dias de funcionamento)\b/.test(
+      msgNorm,
+    )
+  ) {
+    const blocos: string[] = [];
+
+    if (cliente) {
+      if (meusAgendamentos.length > 0) {
+        blocos.push(`📅 **Seus Agendamentos (${cliente.nome}):**`);
+        for (const a of meusAgendamentos.slice(0, 5)) {
+          blocos.push(
+            `• **${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim}** — **${a.servico_nome}** (${a.duracao_minutos} min) — R$ ${formatMoney(Number(a.preco))} — Status: **${a.status}**`,
+          );
+        }
+        blocos.push('');
+      } else {
+        blocos.push(`📅 Olá, **${cliente.nome}**! Você ainda não possui agendamentos registrados nesta loja.\n`);
+      }
+    } else {
+      blocos.push('📅 Faça login na loja para consultar seus agendamentos ou reservar um horário.\n');
+    }
+
+    if (servicos.length > 0) {
+      blocos.push(`🛠️ **Serviços / Procedimentos Disponíveis (${servicos.length}):**`);
+      for (const s of servicos.slice(0, 8)) {
+        blocos.push(
+          `• **${s.nome}** — ⏱️ Duração: **${s.duracao_minutos} min** — **R$ ${formatMoney(Number(s.preco))}**${
+            s.descricao ? `\n  _${s.descricao}_` : ''
+          }`,
+        );
+      }
+      blocos.push('');
+    }
+
+    if (empresa.agenda_ativa === 1) {
+      blocos.push(
+        `🕒 **Funcionamento da Agenda:** ${diasFuncionamento || 'Consulte a loja'}, das **${empresa.agenda_inicio}** às **${empresa.agenda_fim}**.`,
+      );
+      blocos.push(
+        `👉 Para escolher uma data e reservar seu horário, clique em **📅 ${empresa.agenda_menu_texto || 'Agenda'}** no menu superior da loja!`,
+      );
+    } else if (servicos.length === 0) {
+      blocos.push('No momento a agenda online de serviços não está habilitada nesta loja.');
+    }
+
+    return json({ resposta: blocos.join('\n') });
+  }
+
   // 3. Perguntas sobre contato, suporte, telefone, whatsapp, horário, trocas, endereço
   if (
     /\b(contato|suporte|telefone|whatsapp|whats|zap|email|e-mail|endereco|localizacao|onde fica|horario|atendimento|troca|devolucao|garantia|ajuda|falar|atendente)\b/.test(
@@ -308,6 +421,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       `Olá${cliente ? `, **${cliente.nome}**` : ''}! 👋 Sou o assistente virtual da **${empresa.nome}**.`,
       'Posso ajudar você agora mesmo com:',
       '• 📦 **Meus pedidos:** pergunte *"qual o status dos meus pedidos"* ou *"pedido #1"*',
+      '• 📅 **Agendamentos e Serviços:** pergunte *"quais os meus agendamentos"* ou *"quais serviços posso agendar"*',
       '• 🏷️ **Produtos e Estoque:** digite o nome de um produto para ver preço e quantidade disponível',
       '• 📞 **Suporte e Contato:** pergunte sobre *"horário de atendimento"*, *"WhatsApp"*, *"trocas"* ou *"endereço"*',
       '',

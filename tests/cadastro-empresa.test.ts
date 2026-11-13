@@ -11,6 +11,10 @@ import {
   validarERenovarSessaoUsuario,
   criarSessaoClienteLoja,
   validarERenovarSessaoClienteLoja,
+  criarServico,
+  criarAgendamentoLoja,
+  listarVisaoAgendaCliente,
+  contarNotificacoesAgendamentoBackoffice,
   IDLE_TIMEOUT_MS,
 } from '../src/lib/empresa-service.ts';
 
@@ -247,5 +251,139 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     // Confirma que o registro da sessão do cliente foi apagado do banco
     const restouLoja = await ctx.d1.prepare('SELECT COUNT(*) AS n FROM sessoes_clientes').first('n');
     assert.equal(restouLoja, 0);
+  });
+
+  test('agenda de serviços: bloqueia horários encavalados, oculta dados de outros clientes e soma no sininho do backoffice', async () => {
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'clinica-agenda',
+      razao: 'CLINICA E SERVICOS LTDA',
+      nome: 'Gestor Agenda',
+      login: 'gestor',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+    const empId = cad.empresaId!;
+
+    // Cria dois clientes distintos
+    const clienteA = await ctx.d1
+      .prepare(
+        `INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, documento, email, ativo)
+         VALUES (?, 'F', 1, 'Maria Segredo', '52998224725', 'maria@segredo.com', 1) RETURNING id`,
+      )
+      .bind(empId)
+      .first<{ id: number }>();
+    const clienteB = await ctx.d1
+      .prepare(
+        `INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, documento, email, ativo)
+         VALUES (?, 'F', 1, 'João Silva', '11144477735', 'joao@silva.com', 1) RETURNING id`,
+      )
+      .bind(empId)
+      .first<{ id: number }>();
+
+    // Cadastra 2 serviços com tempos de execução diferentes (60 min e 45 min)
+    const srv60 = await criarServico(ctx.d1, empId, {
+      nome: 'Procedimento Completo (1h)',
+      descricao: 'Atendimento de 60 minutos',
+      duracaoMinutos: 60,
+      preco: 150,
+    });
+    const srv45 = await criarServico(ctx.d1, empId, {
+      nome: 'Manutenção Rápida (45min)',
+      descricao: 'Atendimento de 45 minutos',
+      duracaoMinutos: 45,
+      preco: 90,
+    });
+    assert.ok(srv60.id > 0);
+    assert.ok(srv45.id > 0);
+
+    // Cliente A agenda das 09:00 às 10:00 (60 min)
+    const ag1 = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: clienteA!.id,
+      servicoId: srv60.id,
+      data: '2026-11-20',
+      horaInicio: '09:00',
+      observacoes: 'Observação particular da Maria',
+    });
+    assert.equal(ag1.ok, true);
+    assert.equal(ag1.horaFim, '10:00');
+
+    // Cliente B tenta agendar às 09:30 (encavalando com 09:00-10:00 da Maria) -> DEVE BLOQUEAR
+    const agConflito = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: clienteB!.id,
+      servicoId: srv45.id,
+      data: '2026-11-20',
+      horaInicio: '09:30',
+    });
+    assert.equal(agConflito.ok, false);
+
+    // Cliente B agenda às 10:00 (10:00 às 10:45, logo após o término das 10:00) -> DEVE PERMITIR
+    const ag2 = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: clienteB!.id,
+      servicoId: srv45.id,
+      data: '2026-11-20',
+      horaInicio: '10:00',
+      observacoes: 'Observação do João',
+    });
+    assert.equal(ag2.ok, true);
+    assert.equal(ag2.horaFim, '10:45');
+
+    // Sininho do Backoffice deve apresentar o número 2 (dois agendamentos marcados não lidos)
+    const qtdSino = await contarNotificacoesAgendamentoBackoffice(ctx.d1, empId);
+    assert.equal(qtdSino, 2);
+
+    // Visão da agenda para o Cliente B (João):
+    // - Horário 09:00-10:00 aparece apenas como OCUPADO, sem nenhum dado de Maria ou do serviço dela
+    // - Horário 10:00-10:45 aparece como MEU, com os dados do próprio agendamento de João
+    const visaoJoao = await listarVisaoAgendaCliente(ctx.d1, {
+      empresaId: empId,
+      parceiroId: clienteB!.id,
+      data: '2026-11-20',
+    });
+    assert.equal(visaoJoao.length, 2);
+
+    const slotMariaVistoPorJoao = visaoJoao[0];
+    assert.equal(slotMariaVistoPorJoao.tipo, 'OCUPADO');
+    assert.equal(slotMariaVistoPorJoao.horaInicio, '09:00');
+    assert.equal(slotMariaVistoPorJoao.horaFim, '10:00');
+    assert.equal((slotMariaVistoPorJoao as any).clienteNome, undefined);
+    assert.equal((slotMariaVistoPorJoao as any).servicoNome, undefined);
+    assert.equal((slotMariaVistoPorJoao as any).observacoes, undefined);
+    assert.equal(JSON.stringify(slotMariaVistoPorJoao).includes('Maria'), false);
+    assert.equal(JSON.stringify(slotMariaVistoPorJoao).includes('Procedimento Completo'), false);
+
+    const slotProprioJoao = visaoJoao[1];
+    assert.equal(slotProprioJoao.tipo, 'MEU');
+    assert.equal(slotProprioJoao.horaInicio, '10:00');
+    assert.equal(slotProprioJoao.horaFim, '10:45');
+    assert.equal(slotProprioJoao.servicoNome, 'Manutenção Rápida (45min)');
+    assert.equal(slotProprioJoao.observacoes, 'Observação do João');
+
+    // Bloqueia agendamento em dia da semana sem funcionamento (2026-11-22 é Domingo = 0)
+    const agDomingo = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: clienteB!.id,
+      servicoId: srv45.id,
+      data: '2026-11-22', // Domingo
+      horaInicio: '09:00',
+      diasSemanaFuncionamento: '1,2,3,4,5', // Somente Segunda a Sexta
+    });
+    assert.equal(agDomingo.ok, false);
+    assert.match(agDomingo.erro || '', /não há prestação de serviços/i);
+
+    // Bloqueia agendamento em data específica fechada/feriado (ex: 2026-11-25)
+    const agFeriado = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: clienteB!.id,
+      servicoId: srv45.id,
+      data: '2026-11-25', // Quarta-feira, porém listada como feriado/folga
+      horaInicio: '09:00',
+      diasSemanaFuncionamento: '1,2,3,4,5',
+      datasFechadas: '2026-11-25, 2026-12-25',
+    });
+    assert.equal(agFeriado.ok, false);
+    assert.match(agFeriado.erro || '', /não há prestação de serviços/i);
   });
 });

@@ -903,6 +903,9 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
           {!bare && cliente && (
             <div class="ml-user-links">
               <span class="ml-user-hello">Olá, <strong>{cliente.nome.split(' ')[0]}</strong></span>
+              {empresa.agenda_ativa === 1 && (
+                <a href={`${baseUrl}/agenda`} style="font-weight:700">📅 {empresa.agenda_menu_texto || 'Agenda'}</a>
+              )}
               <a href={`${baseUrl}/meus-pedidos`}>Compras</a>
               <a href={`${baseUrl}/carrinho`} class="ml-cart-pill">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1024,6 +1027,9 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
           {cliente && (
             <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
               <a href={baseUrl}>• Catálogo de produtos</a>
+              {empresa.agenda_ativa === 1 && (
+                <a href={`${baseUrl}/agenda`}>• {empresa.agenda_menu_texto || 'Agendar serviço'}</a>
+              )}
               <a href={`${baseUrl}/meus-pedidos`}>• Acompanhar meus pedidos</a>
               <a href={`${baseUrl}/carrinho`}>• Meu carrinho de compras</a>
             </div>
@@ -1062,7 +1068,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       <div class="bot-head">
         <div>
           <div class="bot-head-title">🤖 Assistente · {empresa.nome}</div>
-          <div class="bot-head-sub">Tire dúvidas sobre seus pedidos e produtos</div>
+          <div class="bot-head-sub">Tire dúvidas sobre pedidos, agendamentos e produtos</div>
         </div>
         <button type="button" class="bot-close" id="bot-close" title="Fechar">✕</button>
       </div>
@@ -1070,12 +1076,13 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       <div class="bot-msgs" id="bot-msgs">
         <div class="bot-bubble bot">
           Olá{cliente ? <>, <strong>{cliente.nome}</strong></> : ''}! 👋 Sou o assistente da <strong>{empresa.nome}</strong>.<br />
-          Posso consultar o <strong>status dos seus pedidos</strong>, verificar <strong>preços e estoque de produtos</strong> ou informar nossos <strong>canais de suporte</strong>. Como posso ajudar?
+          Posso consultar o <strong>status dos seus pedidos</strong>, seus <strong>agendamentos e serviços</strong>, verificar <strong>preços e estoque de produtos</strong> ou informar nossos <strong>canais de suporte</strong>. Como posso ajudar?
         </div>
       </div>
 
       <div class="bot-chips">
         <button type="button" class="bot-chip" data-ask="Qual o status dos meus pedidos?">📦 Meus pedidos</button>
+        <button type="button" class="bot-chip" data-ask="Quais são os meus agendamentos e serviços disponíveis?">📅 Agendamentos</button>
         <button type="button" class="bot-chip" data-ask="Quais produtos estão disponíveis em estoque?">🛍️ Produtos e estoque</button>
         <button type="button" class="bot-chip" data-ask="Qual o telefone, WhatsApp e horário de suporte?">📞 Suporte e contato</button>
         <button type="button" class="bot-chip" data-ask="Qual o endereço da loja?">📍 Endereço</button>
@@ -1085,7 +1092,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         <input
           type="text"
           id="bot-input"
-          placeholder="Pergunte sobre um pedido ou produto..."
+          placeholder="Pergunte sobre pedidos, agendamentos ou produtos..."
           autocomplete="off"
         />
         <button type="submit" id="bot-send">Enviar</button>

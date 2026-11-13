@@ -1,0 +1,218 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { formatMoney, parseNum, str } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+
+let erro = '';
+let ok = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? 'salvar');
+
+  if (acao === 'excluir') {
+    const id = Number(f.get('id')) || 0;
+    await db().prepare('DELETE FROM servicos WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).run();
+    ok = 'Serviço removido.';
+  } else if (acao === 'alternar') {
+    const id = Number(f.get('id')) || 0;
+    await db()
+      .prepare('UPDATE servicos SET ativo = CASE WHEN ativo = 1 THEN 0 ELSE 1 END WHERE id = ? AND empresa_id = ?')
+      .bind(id, u.empresaId)
+      .run();
+    ok = 'Status do serviço atualizado.';
+  } else {
+    const id = Number(f.get('id')) || 0;
+    const nome = str(f, 'nome', 160);
+    const descricao = str(f, 'descricao', 500);
+    const duracaoMinutos = Math.max(5, Math.min(720, Math.round(parseNum(f.get('duracao_minutos'), 30))));
+    const preco = Math.max(0, parseNum(f.get('preco'), 0));
+    const ativo = f.get('ativo') ? 1 : 0;
+
+    if (!nome) {
+      erro = 'Informe o nome do serviço / procedimento.';
+    } else if (duracaoMinutos < 5) {
+      erro = 'O tempo de execução deve ser de pelo menos 5 minutos.';
+    } else if (id > 0) {
+      await db()
+        .prepare(
+          `UPDATE servicos
+              SET nome = ?, descricao = ?, duracao_minutos = ?, preco = ?, ativo = ?
+            WHERE id = ? AND empresa_id = ?`,
+        )
+        .bind(nome, descricao || null, duracaoMinutos, preco, ativo, id, u.empresaId)
+        .run();
+      ok = 'Serviço atualizado com sucesso!';
+    } else {
+      await db()
+        .prepare(
+          `INSERT INTO servicos (empresa_id, nome, descricao, duracao_minutos, preco, ativo)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(u.empresaId, nome, descricao || null, duracaoMinutos, preco, ativo)
+        .run();
+      ok = 'Serviço cadastrado com sucesso!';
+    }
+  }
+}
+
+const editId = Number(Astro.url.searchParams.get('editar')) || 0;
+const editando = editId
+  ? await db()
+      .prepare('SELECT * FROM servicos WHERE id = ? AND empresa_id = ?')
+      .bind(editId, u.empresaId)
+      .first<any>()
+  : null;
+
+const emp = await db()
+  .prepare("SELECT codigo, COALESCE(agenda_ativa, 0) AS agenda_ativa FROM empresas WHERE id = ?")
+  .bind(u.empresaId)
+  .first<{ codigo: string; agenda_ativa: number }>();
+
+const { results: servicos } = await db()
+  .prepare('SELECT * FROM servicos WHERE empresa_id = ? ORDER BY ativo DESC, nome ASC')
+  .bind(u.empresaId)
+  .all<any>();
+
+function formatarDuracao(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}min (${min} min)`;
+  if (h > 0) return `${h}h (${min} min)`;
+  return `${min} min`;
+}
+---
+<Layout title="Cadastro de Serviços" active="servicos">
+  <div class="row">
+    <h1>🛠️ Cadastro de Serviços e Procedimentos</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/agendamentos">📅 Ver Agenda ({emp?.agenda_ativa ? 'Menu Ativo na Loja' : 'Menu Oculto na Loja'})</a>
+    <a class="btn sec" href="/loja-config">⚙️ Configurar Menu da Agenda</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">{ok}</div>}
+
+  <div class="card">
+    <h2>{editando ? `Editar Serviço #${editando.id}` : 'Novo Serviço / Procedimento'}</h2>
+    <p class="muted" style="margin-top:0">
+      Informe o <strong>tempo de execução (em minutos)</strong> de cada procedimento para que a agenda bloqueie automaticamente todo o período necessário e impeça agendamentos encavalados.
+    </p>
+    <form method="post" class="grid">
+      <input type="hidden" name="_acao" value="salvar" />
+      {editando && <input type="hidden" name="id" value={editando.id} />}
+
+      <div class="c5">
+        <label>Nome do Serviço / Procedimento *</label>
+        <input
+          name="nome"
+          required
+          value={editando?.nome ?? ''}
+          placeholder="Ex: Consulta Completa, Corte + Barba, Manutenção Preventiva..."
+        />
+      </div>
+
+      <div class="c3">
+        <label>Tempo de Execução (minutos) *</label>
+        <input
+          type="number"
+          name="duracao_minutos"
+          min="5"
+          max="720"
+          step="5"
+          required
+          value={editando?.duracao_minutos ?? 30}
+        />
+      </div>
+
+      <div class="c2">
+        <label>Valor (R$)</label>
+        <input
+          type="number"
+          name="preco"
+          min="0"
+          step="0.01"
+          value={editando ? Number(editando.preco).toFixed(2) : '0.00'}
+        />
+      </div>
+
+      <div class="c2" style="display:flex;align-items:flex-end;padding-bottom:8px">
+        <label class="check">
+          <input type="checkbox" name="ativo" value="1" checked={editando ? editando.ativo === 1 : true} />
+          Ativo na loja
+        </label>
+      </div>
+
+      <div class="c12">
+        <label>Descrição / Orientações para o cliente (opcional)</label>
+        <input
+          name="descricao"
+          value={editando?.descricao ?? ''}
+          placeholder="Ex: Chegar com 10 minutos de antecedência..."
+        />
+      </div>
+
+      <div class="c12 row">
+        <button>{editando ? 'Salvar alterações' : '+ Cadastrar serviço'}</button>
+        {editando && <a class="btn sec" href="/servicos">Cancelar edição</a>}
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Serviços Cadastrados ({servicos.length})</h2>
+    {servicos.length === 0 ? (
+      <p class="muted">Nenhum serviço cadastrado ainda. Cadastre acima para permitir agendamentos na loja.</p>
+    ) : (
+      <table>
+        <thead>
+          <tr>
+            <th>Serviço / Procedimento</th>
+            <th>Tempo de Execução</th>
+            <th class="num">Valor</th>
+            <th>Status</th>
+            <th class="num">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {servicos.map((s) => (
+            <tr>
+              <td>
+                <strong>{s.nome}</strong>
+                {s.descricao && <div class="muted" style="font-size:12px">{s.descricao}</div>}
+              </td>
+              <td>
+                <span class="tag ok">⏱️ {formatarDuracao(s.duracao_minutos)}</span>
+              </td>
+              <td class="num">R$ {formatMoney(s.preco)}</td>
+              <td>
+                {s.ativo === 1 ? (
+                  <span class="tag ok">Ativo</span>
+                ) : (
+                  <span class="tag off">Inativo</span>
+                )}
+              </td>
+              <td class="num">
+                <div class="row" style="justify-content:flex-end;gap:6px">
+                  <a class="btn sm sec" href={`/servicos?editar=${s.id}`}>Editar</a>
+                  <form method="post" style="display:inline">
+                    <input type="hidden" name="_acao" value="alternar" />
+                    <input type="hidden" name="id" value={s.id} />
+                    <button class="sm sec">{s.ativo === 1 ? 'Pausar' : 'Ativar'}</button>
+                  </form>
+                  <form method="post" style="display:inline" onsubmit="return confirm('Excluir este serviço?')">
+                    <input type="hidden" name="_acao" value="excluir" />
+                    <input type="hidden" name="id" value={s.id} />
+                    <button class="sm danger">Excluir</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+</Layout>

@@ -1,0 +1,264 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { DIAS_SEMANA_LABELS } from '../../lib/empresa-service';
+import { formatDoc, formatMoney, str } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+
+let ok = '';
+let erro = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? '');
+
+  if (acao === 'alternar_menu_loja') {
+    await db()
+      .prepare('UPDATE empresas SET agenda_ativa = CASE WHEN COALESCE(agenda_ativa, 0) = 1 THEN 0 ELSE 1 END WHERE id = ?')
+      .bind(u.empresaId)
+      .run();
+    ok = 'Visibilidade do menu da Agenda na loja virtual atualizada!';
+  } else if (acao === 'salvar_texto_menu') {
+    const texto = str(f, 'agenda_menu_texto', 60) || 'Agenda';
+    await db()
+      .prepare('UPDATE empresas SET agenda_menu_texto = ? WHERE id = ?')
+      .bind(texto, u.empresaId)
+      .run();
+    ok = `Texto do menu da agenda na loja atualizado para "${texto}"!`;
+  } else if (acao === 'marcar_vistos') {
+    await db()
+      .prepare('UPDATE agendamentos SET visto_admin = 1 WHERE empresa_id = ? AND visto_admin = 0')
+      .bind(u.empresaId)
+      .run();
+    ok = 'Notificações do sininho marcadas como visualizadas.';
+  } else if (acao === 'status') {
+    const id = Number(f.get('id')) || 0;
+    const novoStatus = String(f.get('status') ?? '');
+    if (['AGENDADO', 'CONFIRMADO', 'CONCLUIDO', 'CANCELADO'].includes(novoStatus)) {
+      await db()
+        .prepare('UPDATE agendamentos SET status = ?, visto_admin = 1 WHERE id = ? AND empresa_id = ?')
+        .bind(novoStatus, id, u.empresaId)
+        .run();
+      ok = `Agendamento #${id} atualizado para ${novoStatus}.`;
+    }
+  }
+}
+
+const emp = await db()
+  .prepare(
+    `SELECT codigo,
+            COALESCE(agenda_ativa, 0) AS agenda_ativa,
+            COALESCE(NULLIF(agenda_menu_texto, ''), 'Agenda') AS agenda_menu_texto,
+            COALESCE(agenda_inicio, '08:00') AS agenda_inicio,
+            COALESCE(agenda_fim, '18:00') AS agenda_fim,
+            COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana
+       FROM empresas WHERE id = ?`,
+  )
+  .bind(u.empresaId)
+  .first<{
+    codigo: string;
+    agenda_ativa: number;
+    agenda_menu_texto: string;
+    agenda_inicio: string;
+    agenda_fim: string;
+    agenda_dias_semana: string;
+  }>();
+
+const diasAtivosResumo = DIAS_SEMANA_LABELS.filter((d) =>
+  String(emp?.agenda_dias_semana ?? '1,2,3,4,5')
+    .split(',')
+    .map((s) => s.trim())
+    .includes(String(d.valor)),
+)
+  .map((d) => d.curto)
+  .join(', ');
+
+const filtroData = Astro.url.searchParams.get('data') ?? '';
+const filtroStatus = Astro.url.searchParams.get('status') ?? '';
+
+let sql = `
+  SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco,
+         a.observacoes, a.status, a.visto_admin, a.criado_em,
+         s.nome AS servico_nome,
+         p.nome AS cliente_nome, p.documento AS cliente_doc, p.celular AS cliente_celular, p.telefone AS cliente_telefone, p.email AS cliente_email
+    FROM agendamentos a
+    JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
+    JOIN parceiros p ON p.id = a.parceiro_id AND p.empresa_id = a.empresa_id
+   WHERE a.empresa_id = ?
+`;
+const binds: unknown[] = [u.empresaId];
+
+if (filtroData) {
+  sql += ' AND a.data = ?';
+  binds.push(filtroData);
+}
+if (filtroStatus) {
+  sql += ' AND a.status = ?';
+  binds.push(filtroStatus);
+}
+sql += ' ORDER BY a.data DESC, a.hora_inicio ASC';
+
+const { results: agendamentos } = await db()
+  .prepare(sql)
+  .bind(...binds)
+  .all<any>();
+
+const qtdNovos = agendamentos.filter((a) => a.visto_admin === 0 && a.status !== 'CANCELADO').length;
+
+function formatDataBr(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd ?? ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
+}
+---
+<Layout title="Agenda de Serviços" active="agendamentos">
+  <div class="row">
+    <h1>📅 Agenda de Serviços</h1>
+    <span class="spacer"></span>
+    <form method="post" style="display:inline">
+      <input type="hidden" name="_acao" value="alternar_menu_loja" />
+      <button class={emp?.agenda_ativa ? 'sec' : ''}>
+        {emp?.agenda_ativa ? '👁️ Ocultar Menu Agenda na Loja' : '🚀 Exibir Menu Agenda na Loja'}
+      </button>
+    </form>
+    <a class="btn sec" href="/servicos">🛠️ Cadastrar Serviços e Tempos</a>
+    <a class="btn sec" href={`/loja/${emp?.codigo}/agenda`} target="_blank">Abrir Agenda na Loja ↗</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">{ok}</div>}
+
+  <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div>
+      <strong>Status do Menu na Loja Virtual:</strong>{' '}
+      {emp?.agenda_ativa ? (
+        <span class="tag ok">Visível como "📅 {emp.agenda_menu_texto}" (/loja/{emp.codigo}/agenda)</span>
+      ) : (
+        <span class="tag off">Oculto na loja (desativado)</span>
+      )}
+      <span class="muted" style="margin-left:10px">
+        Funcionamento: <strong>{diasAtivosResumo || 'Nenhum dia selecionado'}</strong> · {emp?.agenda_inicio} às {emp?.agenda_fim} (<a href="/loja-config">alterar dias/horários</a>)
+      </span>
+    </div>
+
+    <form method="post" class="row" style="margin:0;gap:6px">
+      <input type="hidden" name="_acao" value="salvar_texto_menu" />
+      <label style="margin:0;font-size:12px">Texto no menu da loja:</label>
+      <input
+        name="agenda_menu_texto"
+        value={emp?.agenda_menu_texto || 'Agenda'}
+        placeholder="Ex: Agende aqui seu serviço"
+        style="width:220px;padding:6px 10px"
+      />
+      <button class="sm sec">Salvar texto</button>
+    </form>
+
+    {qtdNovos > 0 && (
+      <form method="post" style="margin:0">
+        <input type="hidden" name="_acao" value="marcar_vistos" />
+        <button class="sm" style="background:#f59e0b">
+          🔔 Marcar {qtdNovos} novo(s) agendamento(s) como vistos
+        </button>
+      </form>
+    )}
+  </div>
+
+  <div class="card">
+    <form method="get" class="row">
+      <div>
+        <label>Filtrar por data</label>
+        <input type="date" name="data" value={filtroData} />
+      </div>
+      <div>
+        <label>Status</label>
+        <select name="status">
+          <option value="">Todos</option>
+          <option value="AGENDADO" selected={filtroStatus === 'AGENDADO'}>Agendado</option>
+          <option value="CONFIRMADO" selected={filtroStatus === 'CONFIRMADO'}>Confirmado</option>
+          <option value="CONCLUIDO" selected={filtroStatus === 'CONCLUIDO'}>Concluído</option>
+          <option value="CANCELADO" selected={filtroStatus === 'CANCELADO'}>Cancelado</option>
+        </select>
+      </div>
+      <div style="align-self:flex-end">
+        <button class="sec">Filtrar</button>
+        {(filtroData || filtroStatus) && <a class="btn sec" href="/agendamentos" style="margin-left:6px">Limpar</a>}
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Agendamentos Registrados ({agendamentos.length})</h2>
+    {agendamentos.length === 0 ? (
+      <p class="muted">Nenhum agendamento encontrado para os filtros selecionados.</p>
+    ) : (
+      <table>
+        <thead>
+          <tr>
+            <th>Data e Horário</th>
+            <th>Serviço / Tempo</th>
+            <th>Cliente</th>
+            <th class="num">Valor</th>
+            <th>Status</th>
+            <th class="num">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {agendamentos.map((a) => (
+            <tr style={a.visto_admin === 0 && a.status !== 'CANCELADO' ? 'background:#fffbeb' : ''}>
+              <td>
+                <strong>{formatDataBr(a.data)}</strong>
+                <div style="font-size:13px;font-weight:700;color:#2563eb">
+                  🕒 {a.hora_inicio} às {a.hora_fim}
+                </div>
+                {a.visto_admin === 0 && a.status !== 'CANCELADO' && (
+                  <span class="tag warn" style="margin-top:3px;display:inline-block">🔔 NOVO</span>
+                )}
+              </td>
+              <td>
+                <strong>{a.servico_nome}</strong>
+                <div class="muted" style="font-size:12px">Duração: {a.duracao_minutos} min</div>
+                {a.observacoes && <div class="muted" style="font-size:12px">Obs: {a.observacoes}</div>}
+              </td>
+              <td>
+                <strong>{a.cliente_nome}</strong>
+                {a.cliente_doc && <div class="muted" style="font-size:12px">{formatDoc(a.cliente_doc)}</div>}
+                {(a.cliente_celular || a.cliente_telefone) && (
+                  <div class="muted" style="font-size:12px">📞 {a.cliente_celular || a.cliente_telefone}</div>
+                )}
+              </td>
+              <td class="num">R$ {formatMoney(a.preco)}</td>
+              <td>
+                {a.status === 'AGENDADO' && <span class="tag warn">Agendado</span>}
+                {a.status === 'CONFIRMADO' && <span class="tag ok">Confirmado</span>}
+                {a.status === 'CONCLUIDO' && <span class="tag ok">Concluído</span>}
+                {a.status === 'CANCELADO' && <span class="tag err">Cancelado</span>}
+              </td>
+              <td class="num">
+                <form method="post" class="row" style="justify-content:flex-end;gap:4px">
+                  <input type="hidden" name="_acao" value="status" />
+                  <input type="hidden" name="id" value={a.id} />
+                  {a.status === 'AGENDADO' && (
+                    <button name="status" value="CONFIRMADO" class="sm">Confirmar</button>
+                  )}
+                  {(a.status === 'AGENDADO' || a.status === 'CONFIRMADO') && (
+                    <button name="status" value="CONCLUIDO" class="sm sec">Concluir</button>
+                  )}
+                  {a.status !== 'CANCELADO' && (
+                    <button
+                      name="status"
+                      value="CANCELADO"
+                      class="sm danger"
+                      onclick="return confirm('Cancelar este agendamento e liberar o horário na loja?')"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+</Layout>

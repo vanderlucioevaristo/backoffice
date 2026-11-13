@@ -1,0 +1,616 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import {
+  db,
+  getLojaEmpresa,
+  getSessionClient,
+  CLIENT_SESSION_COOKIE,
+  IDLE_TIMEOUT_SEC,
+} from '../../../lib/auth';
+import {
+  criarAgendamentoLoja,
+  listarVisaoAgendaCliente,
+  horaParaMinutos,
+  minutosParaHora,
+  verificarDiaFuncionamentoAgenda,
+  DIAS_SEMANA_LABELS,
+} from '../../../lib/empresa-service';
+import { formatMoney, str } from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
+const cliente = token ? await getSessionClient(token, empCodigo) : null;
+if (!cliente) {
+  if (token) {
+    Astro.cookies.delete(CLIENT_SESSION_COOKIE, { path: '/' });
+    return Astro.redirect(`/loja/${empCodigo}/login?expirado=1`);
+  }
+  return Astro.redirect(`/loja/${empCodigo}/login`);
+}
+Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
+  httpOnly: true,
+  secure: import.meta.env.PROD,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: IDLE_TIMEOUT_SEC,
+});
+
+const hojeDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+const hojeYmd = hojeDate.toISOString().slice(0, 10);
+
+const diasSemanaCfg = empresa.agenda_dias_semana ?? '1,2,3,4,5';
+const datasFechadasCfg = empresa.agenda_datas_fechadas ?? null;
+
+const paramData = Astro.url.searchParams.get('data');
+let dataSel = paramData ?? hojeYmd;
+if (!/^\d{4}-\d{2}-\d{2}$/.test(dataSel) || dataSel < hojeYmd) {
+  dataSel = hojeYmd;
+}
+// Se o cliente abriu a página sem escolher uma data específica e hoje não tem expediente,
+// avança automaticamente para o próximo dia de funcionamento da loja
+if (!paramData && Astro.request.method === 'GET') {
+  for (let i = 0; i < 14; i++) {
+    const dt = new Date(hojeDate.getTime() + i * 86400000).toISOString().slice(0, 10);
+    if (verificarDiaFuncionamentoAgenda(dt, diasSemanaCfg, datasFechadasCfg).aberto) {
+      dataSel = dt;
+      break;
+    }
+  }
+}
+
+let msgOk = '';
+let msgErro = '';
+
+if (Astro.request.method === 'POST' && empresa.agenda_ativa === 1) {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? 'agendar');
+
+  if (acao === 'cancelar_meu') {
+    const agId = Number(f.get('agendamento_id')) || 0;
+    await db()
+      .prepare(
+        `UPDATE agendamentos
+            SET status = 'CANCELADO'
+          WHERE id = ? AND empresa_id = ? AND parceiro_id = ? AND status IN ('AGENDADO', 'CONFIRMADO')`,
+      )
+      .bind(agId, empresa.id, cliente.id)
+      .run();
+    msgOk = 'Seu agendamento foi cancelado e o horário foi liberado.';
+  } else {
+    const servicoId = Number(f.get('servico_id')) || 0;
+    const dataForm = String(f.get('data') ?? dataSel).trim();
+    const horaInicio = String(f.get('hora_inicio') ?? '').trim();
+    const observacoes = str(f, 'observacoes', 400);
+
+    if (dataForm >= hojeYmd) dataSel = dataForm;
+
+    const res = await criarAgendamentoLoja(db(), {
+      empresaId: empresa.id,
+      parceiroId: cliente.id,
+      servicoId,
+      data: dataSel,
+      horaInicio,
+      observacoes,
+      expedienteInicio: empresa.agenda_inicio || '08:00',
+      expedienteFim: empresa.agenda_fim || '18:00',
+      diasSemanaFuncionamento: diasSemanaCfg,
+      datasFechadas: datasFechadasCfg,
+    });
+
+    if (res.ok) {
+      msgOk = `Agendamento confirmado para ${dataSel.split('-').reverse().join('/')} das ${res.horaInicio} às ${res.horaFim}!`;
+    } else {
+      msgErro = res.erro || 'Não foi possível realizar o agendamento.';
+    }
+  }
+}
+
+const qtdCarrinho =
+  (await db()
+    .prepare('SELECT COALESCE(SUM(quantidade), 0) AS n FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ?')
+    .bind(empresa.id, cliente.id)
+    .first<number>('n')) ?? 0;
+
+const { results: servicos } = await db()
+  .prepare('SELECT id, nome, descricao, duracao_minutos, preco FROM servicos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome ASC')
+  .bind(empresa.id)
+  .all<{ id: number; nome: string; descricao: string | null; duracao_minutos: number; preco: number }>();
+
+const statusDiaSelecionado = verificarDiaFuncionamentoAgenda(dataSel, diasSemanaCfg, datasFechadasCfg);
+const diasFuncionamentoTexto = DIAS_SEMANA_LABELS.filter((d) =>
+  String(diasSemanaCfg)
+    .split(',')
+    .map((s) => s.trim())
+    .includes(String(d.valor)),
+)
+  .map((d) => d.curto)
+  .join(', ');
+
+// Visão blindada da agenda no dia selecionado:
+// Outros clientes aparecem apenas como { tipo: 'OCUPADO', horaInicio, horaFim }
+const ocupacoesDia = await listarVisaoAgendaCliente(db(), {
+  empresaId: empresa.id,
+  parceiroId: cliente.id,
+  data: dataSel,
+});
+
+// Lista somente os agendamentos pertencentes ao cliente logado
+const { results: meusAgendamentos } = await db()
+  .prepare(
+    `SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco, a.status, a.observacoes,
+            s.nome AS servico_nome
+       FROM agendamentos a
+       JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
+      WHERE a.empresa_id = ? AND a.parceiro_id = ?
+      ORDER BY a.data DESC, a.hora_inicio DESC
+      LIMIT 30`,
+  )
+  .bind(empresa.id, cliente.id)
+  .all<any>();
+
+// Gera a grade de horários do expediente da loja
+const inicioExpMin = horaParaMinutos(empresa.agenda_inicio || '08:00');
+const fimExpMin = horaParaMinutos(empresa.agenda_fim || '18:00');
+const passoMin = Math.max(10, Number(empresa.agenda_intervalo_min) || 30);
+
+type GradeSlot = {
+  hora: string;
+  min: number;
+  estado: 'DISPONIVEL' | 'OCUPADO' | 'MEU';
+  meuDetalhe?: {
+    id: number;
+    servicoNome: string;
+    horaInicio: string;
+    horaFim: string;
+    status: string;
+  };
+  intervaloOcupado?: string;
+};
+
+const gradeHorarios: GradeSlot[] = [];
+if (inicioExpMin >= 0 && fimExpMin > inicioExpMin) {
+  for (let m = inicioExpMin; m < fimExpMin; m += passoMin) {
+    const hStr = minutosParaHora(m);
+    const slotFimMin = m + passoMin;
+
+    // Verifica se este bloco colide com alguma ocupação do dia
+    const colisao = ocupacoesDia.find((oc) => {
+      const ocIni = horaParaMinutos(oc.horaInicio);
+      const ocFim = horaParaMinutos(oc.horaFim);
+      return ocIni < slotFimMin && ocFim > m;
+    });
+
+    if (!colisao) {
+      gradeHorarios.push({ hora: hStr, min: m, estado: 'DISPONIVEL' });
+    } else if (colisao.tipo === 'MEU') {
+      gradeHorarios.push({
+        hora: hStr,
+        min: m,
+        estado: 'MEU',
+        meuDetalhe: {
+          id: colisao.id,
+          servicoNome: colisao.servicoNome,
+          horaInicio: colisao.horaInicio,
+          horaFim: colisao.horaFim,
+          status: colisao.status,
+        },
+      });
+    } else {
+      gradeHorarios.push({
+        hora: hStr,
+        min: m,
+        estado: 'OCUPADO',
+        intervaloOcupado: `${colisao.horaInicio} às ${colisao.horaFim}`,
+      });
+    }
+  }
+}
+
+function formatDataBr(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd ?? ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
+}
+---
+<LojaLayout title={empresa.agenda_menu_texto || 'Agenda de Serviços'} empresa={empresa} cliente={cliente} qtdCarrinho={qtdCarrinho}>
+  <style>
+    .ag-wrap {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 18px;
+      align-items: start;
+    }
+    .ag-card {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    }
+    .ag-slots-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .ag-slot {
+      border-radius: 12px;
+      padding: 10px 12px;
+      border: 1.5px solid #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      text-align: left;
+      transition: all 0.15s;
+    }
+    .ag-slot.livre {
+      background: #f0fdf4;
+      border-color: #86efac;
+      color: #14532d;
+      cursor: pointer;
+    }
+    .ag-slot.livre:hover {
+      border-color: #16a34a;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(22, 163, 74, 0.15);
+    }
+    .ag-slot.livre.selecionado {
+      background: #16a34a;
+      border-color: #15803d;
+      color: #ffffff;
+    }
+    .ag-slot.livre.insuficiente {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      color: #64748b;
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+    .ag-slot.ocupado {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #991b1b;
+      cursor: not-allowed;
+      opacity: 0.85;
+    }
+    .ag-slot.meu {
+      background: #eff6ff;
+      border-color: #93c5fd;
+      color: #1e3a8a;
+    }
+    .ag-slot-time {
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .ag-slot-status {
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    @media (max-width: 768px) {
+      .ag-wrap {
+        grid-template-columns: 1fr;
+      }
+      .ag-slots-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+
+  <div class="row" style="margin-bottom:14px">
+    <h1 style="margin:0">📅 {empresa.agenda_menu_texto || 'Agenda de Serviços'}</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href={`/loja/${empresa.codigo}`}>← Voltar aos produtos</a>
+  </div>
+
+  {msgOk && <div class="msg ok">{msgOk}</div>}
+  {msgErro && <div class="msg err">{msgErro}</div>}
+
+  {empresa.agenda_ativa !== 1 ? (
+    <div class="ag-card">
+      <h2>Agenda indisponível no momento</h2>
+      <p class="muted">A agenda online de serviços não está habilitada nesta loja no momento.</p>
+      <a class="btn" href={`/loja/${empresa.codigo}`}>Voltar para a Loja</a>
+    </div>
+  ) : (
+    <>
+      <div class="ag-wrap">
+        <!-- Coluna 1: Formulário de Agendamento -->
+        <div class="ag-card">
+          <h2 style="margin-top:0">1. Escolha a Data e o Serviço</h2>
+
+          <form method="get" action={`/loja/${empresa.codigo}/agenda`} id="form-data" style="margin-bottom:16px">
+            <label for="inp-data">Data desejada ({statusDiaSelecionado.nomeDia})</label>
+            <input
+              type="date"
+              id="inp-data"
+              name="data"
+              min={hojeYmd}
+              value={dataSel}
+              onchange="this.form.submit()"
+            />
+            <small class="muted" style="display:block;margin-top:4px">
+              Dias de atendimento: <strong>{diasFuncionamentoTexto || 'Consulte a loja'}</strong> ({empresa.agenda_inicio} às {empresa.agenda_fim})
+            </small>
+          </form>
+
+          {!statusDiaSelecionado.aberto && (
+            <div class="msg err" style="margin-bottom:14px">
+              🚫 {statusDiaSelecionado.motivo}
+            </div>
+          )}
+
+          {servicos.length === 0 ? (
+            <p class="muted">Nenhum serviço disponível para agendamento no momento.</p>
+          ) : (
+            <form method="post" id="form-agendar">
+              <input type="hidden" name="_acao" value="agendar" />
+              <input type="hidden" name="data" value={dataSel} />
+
+              <p>
+                <label for="sel-servico">Procedimento / Serviço *</label>
+                <select id="sel-servico" name="servico_id" required>
+                  {servicos.map((s) => (
+                    <option value={s.id} data-duracao={s.duracao_minutos} data-preco={s.preco}>
+                      {s.nome} — ⏱️ {s.duracao_minutos} min — R$ {formatMoney(s.preco)}
+                    </option>
+                  ))}
+                </select>
+              </p>
+
+              <p>
+                <label for="inp-hora">Horário de início selecionado *</label>
+                <input
+                  type="time"
+                  id="inp-hora"
+                  name="hora_inicio"
+                  required
+                  min={empresa.agenda_inicio || '08:00'}
+                  max={empresa.agenda_fim || '18:00'}
+                  placeholder="Clique em um horário disponível ao lado"
+                />
+                <small class="muted" id="resumo-tempo" style="display:block;margin-top:4px">
+                  Selecione um horário verde na grade ao lado para preencher automaticamente.
+                </small>
+              </p>
+
+              <p>
+                <label for="inp-obs">Observações (opcional)</label>
+                <textarea
+                  id="inp-obs"
+                  name="observacoes"
+                  rows="2"
+                  placeholder="Alguma preferência ou observação para o atendimento?"
+                ></textarea>
+              </p>
+
+              <button
+                type="submit"
+                style="width:100%;padding:11px;font-size:15px"
+                disabled={!statusDiaSelecionado.aberto}
+              >
+                {statusDiaSelecionado.aberto ? '✅ Confirmar Agendamento' : '🚫 Sem expediente nesta data'}
+              </button>
+            </form>
+          )}
+        </div>
+
+        <!-- Coluna 2: Grade de Horários do Dia (Disponível / Ocupado / Meu) -->
+        <div class="ag-card">
+          <div class="row" style="justify-content:space-between">
+            <h2 style="margin:0">2. Horários em {formatDataBr(dataSel)} ({statusDiaSelecionado.nomeDia})</h2>
+            <span class="muted" style="font-size:12px">
+              {diasFuncionamentoTexto} · {empresa.agenda_inicio} às {empresa.agenda_fim}
+            </span>
+          </div>
+          {!statusDiaSelecionado.aberto ? (
+            <div style="margin-top:16px;padding:24px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;text-align:center">
+              <strong style="font-size:16px;display:block;margin-bottom:6px">
+                🚫 Não há prestação de serviços nesta data
+              </strong>
+              <span style="font-size:13.5px">{statusDiaSelecionado.motivo}</span>
+            </div>
+          ) : (
+            <>
+              <p class="muted" style="font-size:12.5px;margin:6px 0 12px">
+                Horários reservados por outros clientes aparecem bloqueados como <strong>Indisponível</strong>. Seus próprios agendamentos são destacados em azul.
+              </p>
+
+              <div
+                class="ag-slots-grid"
+                id="grade-slots"
+                data-fim-expediente={fimExpMin}
+                data-ocupacoes={JSON.stringify(
+                  ocupacoesDia.map((o) => ({
+                    ini: horaParaMinutos(o.horaInicio),
+                    fim: horaParaMinutos(o.horaFim),
+                  })),
+                )}
+              >
+                {gradeHorarios.map((slot) =>
+                  slot.estado === 'DISPONIVEL' ? (
+                    <button
+                      type="button"
+                      class="ag-slot livre"
+                      data-hora={slot.hora}
+                      data-min={slot.min}
+                    >
+                      <span class="ag-slot-time">🕒 {slot.hora}</span>
+                      <span class="ag-slot-status status-txt">🟢 Disponível</span>
+                    </button>
+                  ) : slot.estado === 'MEU' && slot.meuDetalhe ? (
+                    <div class="ag-slot meu">
+                      <span class="ag-slot-time">📅 {slot.hora}</span>
+                      <span class="ag-slot-status">✅ Meu agendamento</span>
+                      <small style="font-size:11px;line-height:1.25">
+                        <strong>{slot.meuDetalhe.servicoNome}</strong> ({slot.meuDetalhe.horaInicio}–{slot.meuDetalhe.horaFim})
+                      </small>
+                    </div>
+                  ) : (
+                    <div class="ag-slot ocupado" title="Horário já reservado">
+                      <span class="ag-slot-time">🔒 {slot.hora}</span>
+                      <span class="ag-slot-status">Indisponível</span>
+                    </div>
+                  ),
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <!-- Seção 3: Somente os agendamentos do próprio cliente logado -->
+      <div class="ag-card" style="margin-top:18px">
+        <h2 style="margin-top:0">📋 Meus Agendamentos</h2>
+        {meusAgendamentos.length === 0 ? (
+          <p class="muted">Você ainda não possui serviços agendados nesta loja.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Data e Horário</th>
+                <th>Serviço / Procedimento</th>
+                <th>Duração</th>
+                <th class="num">Valor</th>
+                <th>Status</th>
+                <th class="num">Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {meusAgendamentos.map((m) => (
+                <tr>
+                  <td>
+                    <strong>{formatDataBr(m.data)}</strong>
+                    <div style="font-size:13px;color:var(--pr);font-weight:700">
+                      {m.hora_inicio} às {m.hora_fim}
+                    </div>
+                  </td>
+                  <td>
+                    <strong>{m.servico_nome}</strong>
+                    {m.observacoes && <div class="muted" style="font-size:12px">Obs: {m.observacoes}</div>}
+                  </td>
+                  <td>{m.duracao_minutos} min</td>
+                  <td class="num">R$ {formatMoney(m.preco)}</td>
+                  <td>
+                    {m.status === 'AGENDADO' && <span class="tag warn">Agendado</span>}
+                    {m.status === 'CONFIRMADO' && <span class="tag ok">Confirmado</span>}
+                    {m.status === 'CONCLUIDO' && <span class="tag ok">Concluído</span>}
+                    {m.status === 'CANCELADO' && <span class="tag err">Cancelado</span>}
+                  </td>
+                  <td class="num">
+                    {(m.status === 'AGENDADO' || m.status === 'CONFIRMADO') && (
+                      <form
+                        method="post"
+                        style="display:inline"
+                        onsubmit="return confirm('Deseja cancelar este agendamento?')"
+                      >
+                        <input type="hidden" name="_acao" value="cancelar_meu" />
+                        <input type="hidden" name="agendamento_id" value={m.id} />
+                        <button class="sm danger">Cancelar</button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  )}
+
+  <script is:inline>
+    (function () {
+      const selServico = document.getElementById('sel-servico');
+      const inpHora = document.getElementById('inp-hora');
+      const resumo = document.getElementById('resumo-tempo');
+      const grade = document.getElementById('grade-slots');
+      if (!selServico || !inpHora || !grade) return;
+
+      const fimExp = Number(grade.getAttribute('data-fim-expediente')) || 1080;
+      let ocupacoes = [];
+      try {
+        ocupacoes = JSON.parse(grade.getAttribute('data-ocupacoes') || '[]');
+      } catch {
+        ocupacoes = [];
+      }
+
+      function minToHora(total) {
+        const h = Math.floor(total / 60);
+        const m = total % 60;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+      }
+
+      function getDuracaoSelecionada() {
+        const opt = selServico.options[selServico.selectedIndex];
+        return opt ? Number(opt.getAttribute('data-duracao')) || 30 : 30;
+      }
+
+      function cabeNoHorario(inicioMin, duracaoMin) {
+        const fimMin = inicioMin + duracaoMin;
+        if (fimMin > fimExp) return false;
+        for (let i = 0; i < ocupacoes.length; i++) {
+          const oc = ocupacoes[i];
+          if (oc.ini < fimMin && oc.fim > inicioMin) return false;
+        }
+        return true;
+      }
+
+      function atualizarGradeParaDuracao() {
+        const duracao = getDuracaoSelecionada();
+        const botoes = grade.querySelectorAll('.ag-slot.livre');
+        botoes.forEach((btn) => {
+          const min = Number(btn.getAttribute('data-min'));
+          const hora = btn.getAttribute('data-hora');
+          const statusEl = btn.querySelector('.status-txt');
+          const cabe = cabeNoHorario(min, duracao);
+          if (cabe) {
+            btn.classList.remove('insuficiente');
+            btn.disabled = false;
+            if (statusEl) {
+              statusEl.textContent =
+                inpHora.value === hora
+                  ? '✓ Selecionado (' + hora + '–' + minToHora(min + duracao) + ')'
+                  : '🟢 Disponível';
+            }
+          } else {
+            btn.classList.add('insuficiente');
+            btn.classList.remove('selecionado');
+            btn.disabled = true;
+            if (statusEl) statusEl.textContent = '⏳ Tempo insuf. (' + duracao + 'm)';
+          }
+        });
+
+        if (inpHora.value) {
+          const partes = inpHora.value.split(':');
+          const m = Number(partes[0]) * 60 + Number(partes[1]);
+          if (resumo) {
+            resumo.textContent =
+              'Horário selecionado: ' +
+              inpHora.value +
+              ' às ' +
+              minToHora(m + duracao) +
+              ' (duração de ' +
+              duracao +
+              ' minutos).';
+          }
+        }
+      }
+
+      grade.querySelectorAll('.ag-slot.livre').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (btn.disabled) return;
+          const hora = btn.getAttribute('data-hora');
+          inpHora.value = hora;
+          grade.querySelectorAll('.ag-slot.livre').forEach((b) => b.classList.remove('selecionado'));
+          btn.classList.add('selecionado');
+          atualizarGradeParaDuracao();
+        });
+      });
+
+      selServico.addEventListener('change', atualizarGradeParaDuracao);
+      inpHora.addEventListener('change', atualizarGradeParaDuracao);
+      atualizarGradeParaDuracao();
+    })();
+  </script>
+</LojaLayout>

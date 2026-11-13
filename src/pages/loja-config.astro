@@ -1,6 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { db } from '../lib/auth';
+import { DIAS_SEMANA_LABELS } from '../lib/empresa-service';
 import { str } from '../lib/validate';
 
 const u = Astro.locals.user!;
@@ -15,7 +16,14 @@ let emp = await db()
             loja_nome, loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
             rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
             rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
-            rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto
+            rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto,
+            COALESCE(agenda_ativa, 0) AS agenda_ativa,
+            COALESCE(NULLIF(agenda_menu_texto, ''), 'Agenda') AS agenda_menu_texto,
+            COALESCE(agenda_inicio, '08:00') AS agenda_inicio,
+            COALESCE(agenda_fim, '18:00') AS agenda_fim,
+            COALESCE(agenda_intervalo_min, 30) AS agenda_intervalo_min,
+            COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
+            agenda_datas_fechadas
        FROM empresas WHERE id = ?`,
   )
   .bind(u.empresaId)
@@ -43,6 +51,17 @@ if (Astro.request.method === 'POST') {
   const rodapeCopyright = str(f, 'rodape_copyright', 240);
   const rodapeCorFundo = validColor(str(f, 'rodape_cor_fundo', 10), '#ffffff');
   const rodapeCorTexto = validColor(str(f, 'rodape_cor_texto', 10), '#333333');
+  const agendaAtiva = f.get('agenda_ativa') ? 1 : 0;
+  const agendaMenuTexto = str(f, 'agenda_menu_texto', 60) || 'Agenda';
+  const agendaInicio = /^\d{2}:\d{2}$/.test(str(f, 'agenda_inicio', 10)) ? str(f, 'agenda_inicio', 10) : '08:00';
+  const agendaFim = /^\d{2}:\d{2}$/.test(str(f, 'agenda_fim', 10)) ? str(f, 'agenda_fim', 10) : '18:00';
+  const agendaIntervaloMin = Math.max(10, Math.min(120, Number(f.get('agenda_intervalo_min')) || 30));
+  const diasMarcados = f
+    .getAll('agenda_dias_semana')
+    .map((v) => String(v).trim())
+    .filter((v) => /^[0-6]$/.test(v));
+  const agendaDiasSemana = diasMarcados.join(',');
+  const agendaDatasFechadas = str(f, 'agenda_datas_fechadas', 1000);
 
   if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
     erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
@@ -53,7 +72,9 @@ if (Astro.request.method === 'POST') {
             SET loja_nome = ?, loja_logo = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?,
                 rodape_sobre = ?, rodape_telefone = ?, rodape_whatsapp = ?, rodape_email = ?,
                 rodape_horario = ?, rodape_endereco = ?, rodape_suporte = ?, rodape_instagram = ?,
-                rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?
+                rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
+                agenda_ativa = ?, agenda_menu_texto = ?, agenda_inicio = ?, agenda_fim = ?, agenda_intervalo_min = ?,
+                agenda_dias_semana = ?, agenda_datas_fechadas = ?
           WHERE id = ?`,
       )
       .bind(
@@ -75,6 +96,13 @@ if (Astro.request.method === 'POST') {
         rodapeCopyright || null,
         rodapeCorFundo,
         rodapeCorTexto,
+        agendaAtiva,
+        agendaMenuTexto,
+        agendaInicio,
+        agendaFim,
+        agendaIntervaloMin,
+        agendaDiasSemana,
+        agendaDatasFechadas || null,
         u.empresaId,
       )
       .run();
@@ -98,6 +126,13 @@ if (Astro.request.method === 'POST') {
       rodape_copyright: rodapeCopyright,
       rodape_cor_fundo: rodapeCorFundo,
       rodape_cor_texto: rodapeCorTexto,
+      agenda_ativa: agendaAtiva,
+      agenda_menu_texto: agendaMenuTexto,
+      agenda_inicio: agendaInicio,
+      agenda_fim: agendaFim,
+      agenda_intervalo_min: agendaIntervaloMin,
+      agenda_dias_semana: agendaDiasSemana,
+      agenda_datas_fechadas: agendaDatasFechadas,
     };
     ok = true;
   }
@@ -141,6 +176,95 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             <label class="check"><input type="checkbox" name="remover_logo" value="1" /> Remover logo atual</label>
           </div>
         )}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📅 Agenda de Serviços na Loja Virtual</h2>
+      <div class="grid">
+        <div class="c12">
+          <label class="check" style="font-size:15px;font-weight:700;color:#0f172a">
+            <input type="checkbox" name="agenda_ativa" value="1" checked={emp.agenda_ativa === 1} />
+            Exibir o menu da Agenda na Loja Virtual (permite que clientes agendem serviços online)
+          </label>
+          <small class="muted" style="display:block;margin-top:4px">
+            Quando marcado, o link aparece no topo da sua loja virtual com o texto personalizado abaixo. Você pode cadastrar os procedimentos e tempos de execução em <a href="/servicos"><strong>Serviços</strong></a> e acompanhar as marcações em <a href="/agendamentos"><strong>Agendamentos</strong></a>.
+          </small>
+        </div>
+        <div class="c6">
+          <label>Texto que aparecerá no menu da agenda na loja</label>
+          <input
+            name="agenda_menu_texto"
+            value={emp.agenda_menu_texto || 'Agenda'}
+            placeholder="Ex: Agende aqui seu serviço"
+          />
+        </div>
+        <div class="c2">
+          <label>Início da agenda</label>
+          <input type="time" name="agenda_inicio" value={emp.agenda_inicio || '08:00'} />
+        </div>
+        <div class="c2">
+          <label>Fim da agenda</label>
+          <input type="time" name="agenda_fim" value={emp.agenda_fim || '18:00'} />
+        </div>
+        <div class="c2">
+          <label>Intervalo da grade</label>
+          <select name="agenda_intervalo_min">
+            {[15, 20, 30, 45, 60].map((m) => (
+              <option value={m} selected={(emp.agenda_intervalo_min || 30) === m}>
+                {m} min
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div class="c12">
+          <label>Dias da semana com prestação de serviço</label>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+            {DIAS_SEMANA_LABELS.map((d) => {
+              const ativos = String(emp.agenda_dias_semana ?? '1,2,3,4,5')
+                .split(',')
+                .map((s: string) => s.trim());
+              return (
+                <label class="check" style="font-weight:600;color:#1e293b">
+                  <input
+                    type="checkbox"
+                    name="agenda_dias_semana"
+                    value={String(d.valor)}
+                    checked={ativos.includes(String(d.valor))}
+                  />
+                  {d.longo}
+                </label>
+              );
+            })}
+          </div>
+          <small class="muted" style="display:block;margin-top:4px">
+            Desmarque os dias da semana em que não há atendimento (ex.: Domingo, Sábado).
+          </small>
+        </div>
+
+        <div class="c12">
+          <label>Datas específicas sem expediente / feriados / folgas (opcional)</label>
+          <div class="row" style="gap:8px;margin-bottom:6px">
+            <input type="date" id="inp-add-data-fechada" style="max-width:200px" />
+            <button
+              type="button"
+              class="sec sm"
+              onclick="const d=document.getElementById('inp-add-data-fechada').value;const t=document.getElementById('inp-datas-fechadas');if(d&&!t.value.includes(d)){t.value=(t.value?t.value+', ':'')+d;}"
+            >
+              + Adicionar data sem expediente
+            </button>
+          </div>
+          <input
+            name="agenda_datas_fechadas"
+            id="inp-datas-fechadas"
+            value={emp.agenda_datas_fechadas ?? ''}
+            placeholder="Ex: 2026-12-25, 2027-01-01 (datas no formato AAAA-MM-DD separadas por vírgula)"
+          />
+          <small class="muted" style="display:block;margin-top:4px">
+            Nessas datas a agenda mostrará aos clientes que não haverá prestação de serviço.
+          </small>
+        </div>
       </div>
     </div>
 

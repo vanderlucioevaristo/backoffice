@@ -5,7 +5,14 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { registrarEmpresaComUsuario } from '../src/lib/empresa-service.ts';
+import {
+  registrarEmpresaComUsuario,
+  criarSessaoUsuario,
+  validarERenovarSessaoUsuario,
+  criarSessaoClienteLoja,
+  validarERenovarSessaoClienteLoja,
+  IDLE_TIMEOUT_MS,
+} from '../src/lib/empresa-service.ts';
 
 /**
  * Cria um adaptador compatível com D1Database sobre um arquivo SQLite temporário vazio
@@ -157,5 +164,88 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     });
     assert.equal(segundo.ok, false);
     assert.equal(segundo.erro, 'Este código de empresa já está em uso.');
+  });
+
+  test('derruba a sessão do usuário se permanecer mais de 5 minutos sem atividade e renova quando ativo', async () => {
+    assert.equal(IDLE_TIMEOUT_MS, 5 * 60 * 1000);
+
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'emp-timeout',
+      razao: 'EMPRESA TIMEOUT LTDA',
+      nome: 'Usuario Timeout',
+      login: 'usrtimeout',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+
+    const t0 = new Date('2026-11-12T12:00:00.000Z').getTime();
+    const sessao = await criarSessaoUsuario(ctx.d1, cad.usuarioId!, cad.empresaId!, t0);
+    assert.equal(sessao.maxAge, 300);
+
+    // Após 3 minutos (dentro do limite de 5 min), a sessão está ativa e é renovada por mais 5 min
+    const t3min = t0 + 3 * 60 * 1000;
+    const usuarioAtivo = await validarERenovarSessaoUsuario(ctx.d1, sessao.token, t3min);
+    assert.ok(usuarioAtivo);
+    assert.equal(usuarioAtivo.login, 'usrtimeout');
+
+    // Se ficar 5 minutos e 1 segundo sem fazer nada após o último acesso (t3min), a sessão cai
+    const tInativo = t3min + 5 * 60 * 1000 + 1000;
+    const usuarioExpirado = await validarERenovarSessaoUsuario(ctx.d1, sessao.token, tInativo);
+    assert.equal(usuarioExpirado, null);
+
+    // Verifica que a sessão expirada foi removida do banco
+    const restou = await ctx.d1.prepare('SELECT COUNT(*) AS n FROM sessoes').first('n');
+    assert.equal(restou, 0);
+  });
+
+  test('derruba a sessão do cliente na loja virtual após 5 minutos de inatividade e renova quando ativo', async () => {
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'loja-timeout',
+      razao: 'LOJA VIRTUAL TIMEOUT LTDA',
+      nome: 'Lojista',
+      login: 'lojista',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+
+    // Cria um cliente na loja
+    const cliente = await ctx.d1
+      .prepare(
+        `INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, documento, email, ativo, senha_hash)
+         VALUES (?, 'F', 1, 'Cliente Loja Teste', '52998224725', 'cliente@lojateste.com', 1, 'pbkdf2$100000$AA==$BB==')
+         RETURNING id`,
+      )
+      .bind(cad.empresaId!)
+      .first<{ id: number }>();
+    assert.ok(cliente?.id);
+
+    const t0 = new Date('2026-11-12T15:00:00.000Z').getTime();
+    const sessaoLoja = await criarSessaoClienteLoja(ctx.d1, cliente!.id, cad.empresaId!, t0);
+    assert.equal(sessaoLoja.maxAge, 300);
+
+    // Após 4 minutos, o cliente interage na loja -> sessão é renovada por mais 5 minutos
+    const t4min = t0 + 4 * 60 * 1000;
+    const clienteAtivo = await validarERenovarSessaoClienteLoja(
+      ctx.d1,
+      sessaoLoja.token,
+      'loja-timeout',
+      t4min,
+    );
+    assert.ok(clienteAtivo);
+    assert.equal(clienteAtivo.nome, 'Cliente Loja Teste');
+
+    // Após 5 minutos e 1 segundo sem atividade desde t4min, a conexão na loja deve cair
+    const tExpirado = t4min + 5 * 60 * 1000 + 1000;
+    const clienteExpirado = await validarERenovarSessaoClienteLoja(
+      ctx.d1,
+      sessaoLoja.token,
+      'loja-timeout',
+      tExpirado,
+    );
+    assert.equal(clienteExpirado, null);
+
+    // Confirma que o registro da sessão do cliente foi apagado do banco
+    const restouLoja = await ctx.d1.prepare('SELECT COUNT(*) AS n FROM sessoes_clientes').first('n');
+    assert.equal(restouLoja, 0);
   });
 });

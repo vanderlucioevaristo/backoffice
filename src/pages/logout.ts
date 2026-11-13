@@ -1,9 +1,13 @@
 import type { APIRoute } from 'astro';
 import { destroySession, SESSION_COOKIE } from '../lib/auth';
 
-export const POST: APIRoute = async ({ cookies, redirect }) => {
+const handleLogout: APIRoute = async ({ url, cookies, redirect }) => {
   const token = cookies.get(SESSION_COOKIE)?.value;
   if (token) await destroySession(token);
   cookies.delete(SESSION_COOKIE, { path: '/' });
-  return redirect('/login');
+  const expirado = url.searchParams.get('expirado') === '1';
+  return redirect(expirado ? '/login?expirado=1' : '/login');
 };
+
+export const POST = handleLogout;
+export const GET = handleLogout;

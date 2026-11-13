@@ -31,10 +31,33 @@ const user = Astro.locals.user;
           </nav>
           <div class="who">
             <span>{user?.empresaNome} · <a href="/conta">{user?.nome}</a></span>
-            <form method="post" action="/logout"><button class="link">Sair</button></form>
+            <form method="post" action="/logout" id="logout-form"><button class="link">Sair</button></form>
           </div>
         </header>
         <main class="page"><slot /></main>
+        <script is:inline>
+          (function () {
+            const IDLE_LIMIT_MS = 5 * 60 * 1000; // 5 minutos
+            let timer;
+            function dropSession() {
+              const form = document.getElementById('logout-form');
+              if (form) {
+                form.action = '/logout?expirado=1';
+                form.submit();
+              } else {
+                window.location.href = '/logout?expirado=1';
+              }
+            }
+            function resetIdleTimer() {
+              clearTimeout(timer);
+              timer = setTimeout(dropSession, IDLE_LIMIT_MS);
+            }
+            ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'].forEach((ev) => {
+              window.addEventListener(ev, resetIdleTimer, { passive: true });
+            });
+            resetIdleTimer();
+          })();
+        </script>
       </>
     )}
   </body>

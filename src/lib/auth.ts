@@ -1,4 +1,14 @@
 import { env } from 'cloudflare:workers';
+import {
+  IDLE_TIMEOUT_SEC,
+  IDLE_TIMEOUT_MS,
+  criarSessaoUsuario,
+  validarERenovarSessaoUsuario,
+  criarSessaoClienteLoja,
+  validarERenovarSessaoClienteLoja,
+} from './empresa-service';
+
+export { IDLE_TIMEOUT_SEC, IDLE_TIMEOUT_MS };
 
 export const db = (): D1Database => {
   const d = ((env as any)?.DB ?? (env as any)?.backoffice) as D1Database | undefined;
@@ -325,16 +335,9 @@ async function sha256(s: string) {
 }
 
 export const SESSION_COOKIE = 'sid';
-const SESSION_DAYS = 7;
 
 export async function createSession(usuarioId: number, empresaId: number) {
-  const token = toHex(crypto.getRandomValues(new Uint8Array(32)));
-  const expira = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
-  await db()
-    .prepare('INSERT INTO sessoes (token_hash, usuario_id, empresa_id, expira_em) VALUES (?, ?, ?, ?)')
-    .bind(await sha256(token), usuarioId, empresaId, expira)
-    .run();
-  return { token, maxAge: SESSION_DAYS * 86400 };
+  return criarSessaoUsuario(db(), usuarioId, empresaId);
 }
 
 export async function destroySession(token: string) {
@@ -352,18 +355,7 @@ export type SessionUser = {
 };
 
 export async function getSessionUser(token: string): Promise<SessionUser | null> {
-  const row = await db()
-    .prepare(
-      `SELECT u.id, u.nome, u.login, u.perfil, e.id AS empresaId,
-              COALESCE(e.nome_fantasia, e.razao_social) AS empresaNome, e.codigo AS empresaCodigo
-         FROM sessoes s
-         JOIN usuarios u ON u.id = s.usuario_id AND u.empresa_id = s.empresa_id AND u.ativo = 1
-         JOIN empresas e ON e.id = s.empresa_id AND e.ativa = 1
-        WHERE s.token_hash = ? AND s.expira_em > ?`,
-    )
-    .bind(await sha256(token), new Date().toISOString())
-    .first<SessionUser>();
-  return row ?? null;
+  return validarERenovarSessaoUsuario(db(), token);
 }
 
 export function signupAllowed() {
@@ -382,13 +374,7 @@ export type SessionClient = {
 };
 
 export async function createClientSession(parceiroId: number, empresaId: number) {
-  const token = toHex(crypto.getRandomValues(new Uint8Array(32)));
-  const expira = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
-  await db()
-    .prepare('INSERT INTO sessoes_clientes (token_hash, parceiro_id, empresa_id, expira_em) VALUES (?, ?, ?, ?)')
-    .bind(await sha256(token), parceiroId, empresaId, expira)
-    .run();
-  return { token, maxAge: SESSION_DAYS * 86400 };
+  return criarSessaoClienteLoja(db(), parceiroId, empresaId);
 }
 
 export async function destroyClientSession(token: string) {
@@ -396,17 +382,7 @@ export async function destroyClientSession(token: string) {
 }
 
 export async function getSessionClient(token: string, empresaCodigo: string): Promise<SessionClient | null> {
-  const row = await db()
-    .prepare(
-      `SELECT p.id, p.nome, p.documento, p.email, e.id AS empresaId, e.codigo AS empresaCodigo
-         FROM sessoes_clientes sc
-         JOIN parceiros p ON p.id = sc.parceiro_id AND p.empresa_id = sc.empresa_id AND p.ativo = 1 AND p.eh_cliente = 1
-         JOIN empresas e ON e.id = sc.empresa_id AND e.ativa = 1
-        WHERE sc.token_hash = ? AND sc.expira_em > ? AND e.codigo = ?`,
-    )
-    .bind(await sha256(token), new Date().toISOString(), empresaCodigo.toLowerCase())
-    .first<SessionClient>();
-  return row ?? null;
+  return validarERenovarSessaoClienteLoja(db(), token, empresaCodigo);
 }
 
 export type LojaEmpresa = {

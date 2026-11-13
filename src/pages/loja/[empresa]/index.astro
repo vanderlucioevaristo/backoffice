@@ -1,6 +1,6 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
-import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE } from '../../../lib/auth';
+import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
 import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, parseNum } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -10,8 +10,19 @@ if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
 const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
 const cliente = token ? await getSessionClient(token, empCodigo) : null;
 if (!cliente) {
+  if (token) {
+    Astro.cookies.delete(CLIENT_SESSION_COOKIE, { path: '/' });
+    return Astro.redirect(`/loja/${empCodigo}/login?expirado=1`);
+  }
   return Astro.redirect(`/loja/${empCodigo}/login`);
 }
+Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
+  httpOnly: true,
+  secure: import.meta.env.PROD,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: IDLE_TIMEOUT_SEC,
+});
 
 let msgOk = '';
 let msgErro = '';

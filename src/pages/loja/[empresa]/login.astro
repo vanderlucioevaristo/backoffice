@@ -20,7 +20,9 @@ if (token && (await getSessionClient(token, empCodigo))) {
   return Astro.redirect(`/loja/${empCodigo}`);
 }
 
-let erro = '';
+let erro = Astro.url.searchParams.get('expirado') === '1'
+  ? 'Sua conexão foi encerrada por permanecer mais de 5 minutos sem atividade.'
+  : '';
 let ident = '';
 
 if (Astro.request.method === 'POST') {
@@ -47,6 +49,7 @@ if (Astro.request.method === 'POST') {
     const ok = parceiro?.senha_hash ? await verifyPassword(senha, parceiro.senha_hash) : await verifyPassword(senha, DUMMY_HASH);
     if (parceiro && parceiro.ativo === 1 && parceiro.eh_cliente === 1 && parceiro.senha_hash && ok) {
       const s = await createClientSession(parceiro.id, empresa.id);
+      await db().prepare('DELETE FROM sessoes_clientes WHERE expira_em < ?').bind(new Date().toISOString()).run();
       Astro.cookies.set(CLIENT_SESSION_COOKIE, s.token, {
         httpOnly: true,
         secure: import.meta.env.PROD,

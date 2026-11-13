@@ -881,7 +881,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       }
     </style>
   </head>
-  <body>
+  <body data-sair-url={!bare && cliente ? `${baseUrl}/sair?expirado=1` : ''}>
     <header class="ml-header">
       <div class="ml-header-inner">
         <div class="ml-top-row">
@@ -913,7 +913,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
                 <span>Carrinho</span>
                 <span class="ml-badge">{qtdCarrinho}</span>
               </a>
-              <form method="post" action={`${baseUrl}/sair`} style="margin:0">
+              <form method="post" action={`${baseUrl}/sair`} id="loja-logout-form" style="margin:0">
                 <button class="ml-logout-btn">Sair</button>
               </form>
             </div>
@@ -1144,6 +1144,10 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
               body: JSON.stringify({ empresa: empresaCodigo, mensagem: q }),
             });
             const data = await resp.json();
+            if (resp.status === 401 || data.sessaoExpirada) {
+              window.location.href = `/loja/${empresaCodigo}/sair?expirado=1`;
+              return;
+            }
             loading.innerHTML = formatBotHtml(
               data.resposta || data.erro || 'Não foi possível obter resposta no momento.',
             );
@@ -1170,6 +1174,32 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
             askBot(btn.getAttribute('data-ask'));
           });
         });
+      })();
+
+      // Desconexão automática por inatividade na Loja Virtual (5 minutos sem executar nada)
+      (function () {
+        const sairUrl = document.body.getAttribute('data-sair-url');
+        const logoutForm = document.getElementById('loja-logout-form');
+        if (!sairUrl && !logoutForm) return;
+        const IDLE_LIMIT_MS = 5 * 60 * 1000; // 5 minutos
+        let timer;
+        function dropClientSession() {
+          if (logoutForm) {
+            const baseAction = logoutForm.getAttribute('action') || '';
+            logoutForm.action = baseAction + (baseAction.includes('?') ? '&' : '?') + 'expirado=1';
+            logoutForm.submit();
+          } else if (sairUrl) {
+            window.location.href = sairUrl;
+          }
+        }
+        function resetIdleTimer() {
+          clearTimeout(timer);
+          timer = setTimeout(dropClientSession, IDLE_LIMIT_MS);
+        }
+        ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'].forEach((ev) => {
+          window.addEventListener(ev, resetIdleTimer, { passive: true });
+        });
+        resetIdleTimer();
       })();
     </script>
   </body>

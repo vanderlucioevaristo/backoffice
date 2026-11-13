@@ -4,7 +4,9 @@ import { db, verifyPassword, createSession, DUMMY_HASH, SESSION_COOKIE, signupAl
 
 if (Astro.locals.user) return Astro.redirect('/');
 
-let erro = '';
+let erro = Astro.url.searchParams.get('expirado') === '1'
+  ? 'Sua conexão foi encerrada por permanecer mais de 5 minutos sem atividade.'
+  : '';
 let empresa = '';
 let login = '';
 if (Astro.request.method === 'POST') {

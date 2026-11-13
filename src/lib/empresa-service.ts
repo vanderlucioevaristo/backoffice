@@ -3,8 +3,17 @@ import { onlyDigits, validCNPJ, validEmail } from './validate.ts';
 const ITERATIONS = 100_000;
 const enc = new TextEncoder();
 
+export const IDLE_TIMEOUT_SEC = 5 * 60; // 5 minutos (300 segundos)
+export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_SEC * 1000;
+
 const toB64 = (buf: ArrayBuffer | Uint8Array) =>
   btoa(String.fromCharCode(...new Uint8Array(buf as ArrayBuffer)));
+const toHex = (buf: ArrayBuffer | Uint8Array) =>
+  [...new Uint8Array(buf as ArrayBuffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+async function sha256Hex(s: string): Promise<string> {
+  return toHex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
+}
 
 async function hashSenhaPbkdf2(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -91,4 +100,105 @@ export async function registrarEmpresaComUsuario(
     empresaId: emp!.id,
     usuarioId: usr!.id,
   };
+}
+
+export async function criarSessaoUsuario(
+  database: any,
+  usuarioId: number,
+  empresaId: number,
+  nowMs = Date.now(),
+) {
+  const token = toHex(crypto.getRandomValues(new Uint8Array(32)));
+  const expira = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  await database
+    .prepare('INSERT INTO sessoes (token_hash, usuario_id, empresa_id, expira_em) VALUES (?, ?, ?, ?)')
+    .bind(await sha256Hex(token), usuarioId, empresaId, expira)
+    .run();
+  return { token, maxAge: IDLE_TIMEOUT_SEC };
+}
+
+export async function validarERenovarSessaoUsuario(
+  database: any,
+  token: string,
+  nowMs = Date.now(),
+) {
+  const hash = await sha256Hex(token);
+  const agoraIso = new Date(nowMs).toISOString();
+
+  const row = await database
+    .prepare(
+      `SELECT u.id, u.nome, u.login, u.perfil, e.id AS empresaId,
+              COALESCE(e.nome_fantasia, e.razao_social) AS empresaNome, e.codigo AS empresaCodigo
+         FROM sessoes s
+         JOIN usuarios u ON u.id = s.usuario_id AND u.empresa_id = s.empresa_id AND u.ativo = 1
+         JOIN empresas e ON e.id = s.empresa_id AND e.ativa = 1
+        WHERE s.token_hash = ? AND s.expira_em > ?`,
+    )
+    .bind(hash, agoraIso)
+    .first();
+
+  if (!row) {
+    // Remove sessão vencida (> 5 minutos de inatividade)
+    await database.prepare('DELETE FROM sessoes WHERE token_hash = ?').bind(hash).run();
+    return null;
+  }
+
+  // Renova o prazo de inatividade por mais 5 minutos a partir desta atividade
+  const novaExpiracao = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  await database
+    .prepare('UPDATE sessoes SET expira_em = ? WHERE token_hash = ?')
+    .bind(novaExpiracao, hash)
+    .run();
+
+  return row;
+}
+
+export async function criarSessaoClienteLoja(
+  database: any,
+  parceiroId: number,
+  empresaId: number,
+  nowMs = Date.now(),
+) {
+  const token = toHex(crypto.getRandomValues(new Uint8Array(32)));
+  const expira = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  await database
+    .prepare('INSERT INTO sessoes_clientes (token_hash, parceiro_id, empresa_id, expira_em) VALUES (?, ?, ?, ?)')
+    .bind(await sha256Hex(token), parceiroId, empresaId, expira)
+    .run();
+  return { token, maxAge: IDLE_TIMEOUT_SEC };
+}
+
+export async function validarERenovarSessaoClienteLoja(
+  database: any,
+  token: string,
+  empresaCodigo: string,
+  nowMs = Date.now(),
+) {
+  const hash = await sha256Hex(token);
+  const agoraIso = new Date(nowMs).toISOString();
+  const row = await database
+    .prepare(
+      `SELECT p.id, p.nome, p.documento, p.email, e.id AS empresaId, e.codigo AS empresaCodigo
+         FROM sessoes_clientes sc
+         JOIN parceiros p ON p.id = sc.parceiro_id AND p.empresa_id = sc.empresa_id AND p.ativo = 1 AND p.eh_cliente = 1
+         JOIN empresas e ON e.id = sc.empresa_id AND e.ativa = 1
+        WHERE sc.token_hash = ? AND sc.expira_em > ? AND e.codigo = ?`,
+    )
+    .bind(hash, agoraIso, empresaCodigo.toLowerCase())
+    .first();
+
+  if (!row) {
+    // Remove sessão vencida do cliente na loja (> 5 minutos de inatividade)
+    await database.prepare('DELETE FROM sessoes_clientes WHERE token_hash = ?').bind(hash).run();
+    return null;
+  }
+
+  // Renova por mais 5 minutos a sessão ativa do cliente na loja
+  const novaExpiracao = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  await database
+    .prepare('UPDATE sessoes_clientes SET expira_em = ? WHERE token_hash = ?')
+    .bind(novaExpiracao, hash)
+    .run();
+
+  return row;
 }

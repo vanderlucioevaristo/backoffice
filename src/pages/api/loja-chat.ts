@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
-import { CLIENT_SESSION_COOKIE, db, getLojaEmpresa, getSessionClient } from '../../lib/auth';
+import { CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC, db, getLojaEmpresa, getSessionClient } from '../../lib/auth';
 import { STATUS_PEDIDO_INFO } from '../../lib/email';
 import { formatMoney, formatQty } from '../../lib/validate';
 
@@ -40,6 +40,19 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
   const token = cookies.get(CLIENT_SESSION_COOKIE)?.value;
   const cliente = token ? await getSessionClient(token, empresa.codigo) : null;
+  if (token && !cliente) {
+    cookies.delete(CLIENT_SESSION_COOKIE, { path: '/' });
+    return json({ sessaoExpirada: true, erro: 'Sua sessão expirou por inatividade.' }, 401);
+  }
+  if (token && cliente) {
+    cookies.set(CLIENT_SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: import.meta.env.PROD,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: IDLE_TIMEOUT_SEC,
+    });
+  }
 
   // Carrega os pedidos do cliente autenticado (se estiver logado)
   let meusPedidos: any[] = [];

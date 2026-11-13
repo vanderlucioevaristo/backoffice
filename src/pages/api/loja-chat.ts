@@ -211,7 +211,37 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   // Motor inteligente local com acesso em tempo real aos pedidos do cliente, produtos, estoque e suporte
   const msgNorm = normalizar(mensagem);
 
-  // 1. Consulta a um número específico de pedido (#123 ou "pedido 123")
+  // 1. Consulta a um número específico de agendamento ("agendamento #1" ou "agendamento 1")
+  const matchAgendamentoNum = msgNorm.match(/agendamento\s*#?\s*(\d+)/);
+  if (matchAgendamentoNum) {
+    const numAg = Number(matchAgendamentoNum[1]);
+    if (!cliente) {
+      return json({
+        resposta: `Para consultar os detalhes do **Agendamento #${numAg}**, faça login na sua conta da loja.`,
+      });
+    }
+    const ag = meusAgendamentos.find((a) => Number(a.id) === numAg);
+    if (!ag) {
+      return json({
+        resposta: `Não encontrei o **Agendamento #${numAg}** vinculado à sua conta (${cliente.nome}). Você possui **${meusAgendamentos.length}** agendamento(s) registrado(s).`,
+      });
+    }
+    return json({
+      resposta: [
+        `📅 **Detalhes do Agendamento #${ag.id}**`,
+        `• **Serviço:** ${ag.servico_nome}`,
+        `• **Data:** ${formatDataBr(ag.data)}`,
+        `• **Horário:** ${ag.hora_inicio} às ${ag.hora_fim} (${ag.duracao_minutos} min)`,
+        `• **Status:** ${ag.status}`,
+        `• **Valor:** R$ ${formatMoney(Number(ag.preco))}`,
+        ag.observacoes ? `• **Observações:** ${ag.observacoes}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    });
+  }
+
+  // 1.5. Consulta a um número específico de pedido (#123 ou "pedido 123")
   const matchPedidoNum = msgNorm.match(/(?:pedido\s*#?\s*|#\s*)(\d+)/);
   if (matchPedidoNum) {
     const numPedido = Number(matchPedidoNum[1]);
@@ -250,41 +280,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     });
   }
 
-  // 2. Perguntas gerais sobre pedidos, entregas, status ou compras do cliente
-  if (
-    /\b(pedido|pedidos|compra|compras|status|situacao|rastreio|entrega|entregue|separacao|andamento)\b/.test(
-      msgNorm,
-    )
-  ) {
-    if (!cliente) {
-      return json({
-        resposta:
-          'Para consultar seus pedidos e o status de entrega, acesse sua conta clicando em **Entrar**.',
-      });
-    }
-    if (meusPedidos.length === 0) {
-      return json({
-        resposta: `Olá, **${cliente.nome}**! Você ainda não possui pedidos finalizados nesta loja. Adicione produtos ao carrinho para fazer seu primeiro pedido!`,
-      });
-    }
-    const resumo = meusPedidos.slice(0, 5).map((p) => {
-      const st = STATUS_PEDIDO_INFO[p.status]?.titulo ?? p.status;
-      const qtdItens = p.itens.reduce((acc: number, i: any) => acc + Number(i.quantidade), 0);
-      return `• **Pedido #${p.id}** (${p.criado_em.slice(0, 10)}) — **${st}** — ${formatQty(qtdItens)} item(ns) — **${formatMoney(Number(p.valor_total))}**`;
-    });
-    return json({
-      resposta: [
-        `📦 **Seus últimos pedidos (${cliente.nome}):**`,
-        ...resumo,
-        '',
-        'Se quiser ver os itens de um pedido específico, digite por exemplo **"pedido #' +
-          meusPedidos[0].id +
-          '"** ou acesse o menu **Compras** no topo da página.',
-      ].join('\n'),
-    });
-  }
-
-  // 2.5. Perguntas sobre agenda, agendamentos, serviços, procedimentos, horários disponíveis ou marcação
+  // 2. Perguntas sobre agenda, agendamentos, serviços, procedimentos, horários disponíveis ou marcação
   if (
     /\b(agenda|agendamento|agendamentos|agendar|agendei|marcar|marcado|servico|servicos|procedimento|procedimentos|consulta|duracao|vaga|vagas|disponibilidade|dias de funcionamento)\b/.test(
       msgNorm,
@@ -297,7 +293,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         blocos.push(`📅 **Seus Agendamentos (${cliente.nome}):**`);
         for (const a of meusAgendamentos.slice(0, 5)) {
           blocos.push(
-            `• **${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim}** — **${a.servico_nome}** (${a.duracao_minutos} min) — R$ ${formatMoney(Number(a.preco))} — Status: **${a.status}**`,
+            `• **#${a.id} — ${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim}** — **${a.servico_nome}** (${a.duracao_minutos} min) — R$ ${formatMoney(Number(a.preco))} — Status: **${a.status}**`,
           );
         }
         blocos.push('');
@@ -332,6 +328,40 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     }
 
     return json({ resposta: blocos.join('\n') });
+  }
+
+  // 2.5. Perguntas gerais sobre pedidos, entregas, status ou compras do cliente
+  if (
+    /\b(pedido|pedidos|compra|compras|status|situacao|rastreio|entrega|entregue|separacao|andamento)\b/.test(
+      msgNorm,
+    )
+  ) {
+    if (!cliente) {
+      return json({
+        resposta:
+          'Para consultar seus pedidos e o status de entrega, acesse sua conta clicando em **Entrar**.',
+      });
+    }
+    if (meusPedidos.length === 0) {
+      return json({
+        resposta: `Olá, **${cliente.nome}**! Você ainda não possui pedidos finalizados nesta loja. Adicione produtos ao carrinho para fazer seu primeiro pedido!`,
+      });
+    }
+    const resumo = meusPedidos.slice(0, 5).map((p) => {
+      const st = STATUS_PEDIDO_INFO[p.status]?.titulo ?? p.status;
+      const qtdItens = p.itens.reduce((acc: number, i: any) => acc + Number(i.quantidade), 0);
+      return `• **Pedido #${p.id}** (${p.criado_em.slice(0, 10)}) — **${st}** — ${formatQty(qtdItens)} item(ns) — **${formatMoney(Number(p.valor_total))}**`;
+    });
+    return json({
+      resposta: [
+        `📦 **Seus últimos pedidos (${cliente.nome}):**`,
+        ...resumo,
+        '',
+        'Se quiser ver os itens de um pedido específico, digite por exemplo **"pedido #' +
+          meusPedidos[0].id +
+          '"** ou acesse o menu **Compras** no topo da página.',
+      ].join('\n'),
+    });
   }
 
   // 3. Perguntas sobre contato, suporte, telefone, whatsapp, horário, trocas, endereço
@@ -369,27 +399,47 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     .filter((t) => t.length >= 2 && !stopWords.has(t));
 
   if (termos.length > 0) {
-    const encontrados = produtos.filter((pr) => {
+    const encontradosProd = produtos.filter((pr) => {
       const alvo = normalizar(`${pr.nome} ${pr.categoria || ''} ${pr.descricao || ''} ${pr.codigo || ''}`);
       return termos.some((t) => alvo.includes(t));
     });
+    const encontradosServ = servicos.filter((s) => {
+      const alvo = normalizar(`${s.nome} ${s.descricao || ''}`);
+      return termos.some((t) => alvo.includes(t));
+    });
 
-    if (encontrados.length > 0) {
-      const lista = encontrados.slice(0, 6).map(
-        (pr) =>
-          `• **${pr.nome}** — **${formatMoney(Number(pr.preco_venda))}** *(Disponível: ${formatQty(Number(pr.estoque_atual))} ${pr.unidade || 'UN'})*${
-            pr.descricao ? `\n  _${pr.descricao.slice(0, 90)}_` : ''
-          }`,
-      );
-      return json({
-        resposta: [
-          `🔍 Encontrei **${encontrados.length}** produto(s) disponível(is) em estoque:`,
+    if (encontradosProd.length > 0 || encontradosServ.length > 0) {
+      const partes: string[] = [];
+      if (encontradosProd.length > 0) {
+        const lista = encontradosProd.slice(0, 6).map(
+          (pr) =>
+            `• **${pr.nome}** — **R$ ${formatMoney(Number(pr.preco_venda))}** *(Disponível: ${formatQty(Number(pr.estoque_atual))} ${pr.unidade || 'UN'})*${
+              pr.descricao ? `\n  _${pr.descricao.slice(0, 90)}_` : ''
+            }`,
+        );
+        partes.push(
+          `🔍 Encontrei **${encontradosProd.length}** produto(s) disponível(is) em estoque:`,
           ...lista,
-          encontrados.length > 6 ? `\n*(E mais ${encontrados.length - 6} item(ns) no catálogo)*` : '',
-          '\nClique sobre o produto na vitrine para abrir os detalhes e adicionar ao carrinho!',
-        ]
-          .filter(Boolean)
-          .join('\n'),
+          encontradosProd.length > 6 ? `*(E mais ${encontradosProd.length - 6} item(ns) no catálogo)*` : '',
+        );
+      }
+      if (encontradosServ.length > 0) {
+        const listaS = encontradosServ.slice(0, 5).map(
+          (s) =>
+            `• **${s.nome}** — ⏱️ **${s.duracao_minutos} min** — **R$ ${formatMoney(Number(s.preco))}**${
+              s.descricao ? `\n  _${s.descricao.slice(0, 90)}_` : ''
+            }`,
+        );
+        partes.push(
+          `🛠️ Encontrei **${encontradosServ.length}** serviço(s) para agendamento:`,
+          ...listaS,
+          empresa.agenda_ativa === 1
+            ? `Acesse **📅 ${empresa.agenda_menu_texto || 'Agenda'}** no topo da loja para agendar seu horário!`
+            : '',
+        );
+      }
+      return json({
+        resposta: partes.filter(Boolean).join('\n'),
       });
     }
   }

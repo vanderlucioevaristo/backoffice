@@ -488,7 +488,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         justify-content: space-between;
       }
 
-      /* Rodapé personalizável da loja */
+      /* Rodapé personalizável da loja (recolhido por padrão, expansível ao clicar) */
       .ml-footer {
         margin-top: auto;
         background: var(--ftBg);
@@ -497,13 +497,35 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         font-size: 13px;
         line-height: 1.5;
       }
+      .ml-footer-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        padding: 11px 16px;
+        background: rgba(128,128,128,.08);
+        color: var(--ftTx);
+        border: none;
+        border-bottom: 1px solid rgba(128,128,128,.15);
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background .15s ease;
+      }
+      .ml-footer-toggle:hover {
+        background: rgba(128,128,128,.15);
+      }
       .ml-footer-inner {
         max-width: 1180px;
         margin: 0 auto;
-        padding: 32px 16px 24px;
-        display: grid;
+        padding: 28px 16px 22px;
+        display: none;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 28px;
+      }
+      .ml-footer.expanded .ml-footer-inner {
+        display: grid;
       }
       .ml-footer-col h4 {
         margin: 0 0 10px;
@@ -961,7 +983,18 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       <slot />
     </main>
 
-    <footer class="ml-footer">
+    <footer class="ml-footer" id="ml-footer">
+      <button
+        type="button"
+        class="ml-footer-toggle"
+        id="ml-footer-toggle"
+        aria-expanded="false"
+        onclick="const f=document.getElementById('ml-footer');const open=f.classList.toggle('expanded');this.setAttribute('aria-expanded',String(open));this.querySelector('.toggle-txt').textContent=open?'Ocultar informações sobre a loja ▲':'Clique para mais informações sobre a loja ▼';if(open)f.scrollIntoView({behavior:'smooth',block:'nearest'});"
+      >
+        <span>ℹ️</span>
+        <span class="toggle-txt">Clique para mais informações sobre a loja ▼</span>
+      </button>
+
       <div class="ml-footer-inner">
         <div class="ml-footer-col">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;opacity:1">

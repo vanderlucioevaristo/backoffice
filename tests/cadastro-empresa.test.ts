@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import {
   registrarEmpresaComUsuario,
+  atualizarCadastroEmpresa,
   criarSessaoUsuario,
   validarERenovarSessaoUsuario,
   criarSessaoClienteLoja,
@@ -475,5 +476,50 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(manifest.theme_color, '#ffe600');
     assert.equal(manifest.background_color, '#ebebeb');
     assert.ok(Array.isArray(manifest.icons) && manifest.icons.length >= 2);
+  });
+
+  test('permite alterar os dados cadastrais de uma empresa existente e do seu administrador', async () => {
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'loja-original',
+      razao: 'RAZAO ORIGINAL LTDA',
+      fantasia: 'Fantasia Antiga',
+      cnpj: '65.491.970/0001-82',
+      nome: 'Admin Antigo',
+      email: 'antigo@loja.com',
+      login: 'adminantigo',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+
+    const upd = await atualizarCadastroEmpresa(ctx.d1, {
+      id: cad.empresaId!,
+      codigo: 'loja-alterada',
+      razao: 'NOVA RAZAO SOCIAL ALTERADA LTDA',
+      fantasia: 'Nova Fantasia',
+      cnpj: '12.ABC.345/01DE-35', // suporta CNPJ numérico ou novo formato alfanumérico
+      ativa: 1,
+      adminId: cad.usuarioId!,
+      adminNome: 'Admin Novo Nome',
+      adminLogin: 'adminnovo',
+      adminEmail: 'novo@loja.com',
+    });
+    assert.equal(upd.ok, true);
+
+    const empDepois = await ctx.d1
+      .prepare('SELECT codigo, razao_social, nome_fantasia, cnpj FROM empresas WHERE id = ?')
+      .bind(cad.empresaId!)
+      .first();
+    assert.equal(empDepois.codigo, 'loja-alterada');
+    assert.equal(empDepois.razao_social, 'NOVA RAZAO SOCIAL ALTERADA LTDA');
+    assert.equal(empDepois.nome_fantasia, 'Nova Fantasia');
+    assert.equal(empDepois.cnpj, '12ABC34501DE35');
+
+    const usrDepois = await ctx.d1
+      .prepare('SELECT nome, login, email FROM usuarios WHERE id = ?')
+      .bind(cad.usuarioId!)
+      .first();
+    assert.equal(usrDepois.nome, 'Admin Novo Nome');
+    assert.equal(usrDepois.login, 'adminnovo');
+    assert.equal(usrDepois.email, 'novo@loja.com');
   });
 });

@@ -1,4 +1,4 @@
-import { onlyDigits, validCNPJ, validEmail } from './validate.ts';
+import { cleanDoc, onlyDigits, validCNPJ, validEmail } from './validate.ts';
 
 const ITERATIONS = 100_000;
 const enc = new TextEncoder();
@@ -57,7 +57,7 @@ export async function registrarEmpresaComUsuario(
   const codigo = String(dados.codigo ?? '').trim().toLowerCase().slice(0, 30);
   const razao = String(dados.razao ?? '').trim().slice(0, 200);
   const fantasia = String(dados.fantasia ?? '').trim().slice(0, 200);
-  const cnpj = onlyDigits(String(dados.cnpj ?? '').trim());
+  const cnpj = cleanDoc(String(dados.cnpj ?? '').trim());
   const nome = String(dados.nome ?? '').trim().slice(0, 200);
   const email = String(dados.email ?? '').trim().slice(0, 200);
   const login = String(dados.login ?? '').trim().toLowerCase().slice(0, 40);
@@ -69,7 +69,7 @@ export async function registrarEmpresaComUsuario(
   if (!razao || !nome || !login) {
     return { ok: false, erro: 'Preencha os campos obrigatórios.' };
   }
-  if (cnpj && !validCNPJ(cnpj)) {
+  if (cnpj && !validCNPJ(cnpj, /[A-Z]/.test(cnpj))) {
     return { ok: false, erro: 'CNPJ inválido.' };
   }
   if (email && !validEmail(email)) {
@@ -100,6 +100,102 @@ export async function registrarEmpresaComUsuario(
     empresaId: emp!.id,
     usuarioId: usr!.id,
   };
+}
+
+export async function atualizarCadastroEmpresa(
+  database: any,
+  dados: {
+    id: number;
+    codigo: string;
+    razao: string;
+    fantasia?: string;
+    cnpj?: string;
+    ativa?: number;
+    adminId?: number;
+    adminNome?: string;
+    adminLogin?: string;
+    adminEmail?: string;
+    adminNovaSenha?: string;
+  },
+): Promise<{ ok: boolean; erro?: string }> {
+  const id = Number(dados.id) || 0;
+  const codigo = String(dados.codigo ?? '').trim().toLowerCase().slice(0, 30);
+  const razao = String(dados.razao ?? '').trim().slice(0, 200);
+  const fantasia = String(dados.fantasia ?? '').trim().slice(0, 200);
+  const cnpj = cleanDoc(String(dados.cnpj ?? '').trim());
+  const ativa = dados.ativa === 0 ? 0 : 1;
+
+  if (!id) {
+    return { ok: false, erro: 'Empresa inválida.' };
+  }
+  if (!/^[a-z0-9][a-z0-9-]{2,29}$/.test(codigo)) {
+    return { ok: false, erro: 'Código da empresa: 3 a 30 caracteres (letras minúsculas, números e hífen).' };
+  }
+  if (!razao) {
+    return { ok: false, erro: 'Informe a Razão Social da empresa.' };
+  }
+  if (cnpj && !validCNPJ(cnpj, /[A-Z]/.test(cnpj))) {
+    return { ok: false, erro: 'CNPJ inválido.' };
+  }
+
+  const dup = await database
+    .prepare('SELECT 1 FROM empresas WHERE codigo = ? AND id <> ?')
+    .bind(codigo, id)
+    .first();
+  if (dup) {
+    return { ok: false, erro: 'Este código de empresa já está em uso por outra empresa.' };
+  }
+
+  if (dados.adminId) {
+    const adminNome = String(dados.adminNome ?? '').trim().slice(0, 200);
+    const adminLogin = String(dados.adminLogin ?? '').trim().toLowerCase().slice(0, 40);
+    const adminEmail = String(dados.adminEmail ?? '').trim().slice(0, 200);
+    const adminNovaSenha = String(dados.adminNovaSenha ?? '');
+
+    if (!adminNome || !adminLogin) {
+      return { ok: false, erro: 'Informe o nome e o login do administrador.' };
+    }
+    if (adminEmail && !validEmail(adminEmail)) {
+      return { ok: false, erro: 'E-mail do administrador inválido.' };
+    }
+    if (adminNovaSenha && adminNovaSenha.length < 8) {
+      return { ok: false, erro: 'A nova senha deve ter pelo menos 8 caracteres.' };
+    }
+
+    const dupLogin = await database
+      .prepare('SELECT 1 FROM usuarios WHERE empresa_id = ? AND login = ? AND id <> ?')
+      .bind(id, adminLogin, dados.adminId)
+      .first();
+    if (dupLogin) {
+      return { ok: false, erro: 'Já existe outro usuário nesta empresa com este login.' };
+    }
+
+    if (adminNovaSenha) {
+      const novoHash = await hashSenhaPbkdf2(adminNovaSenha);
+      await database
+        .prepare(
+          "UPDATE usuarios SET nome = ?, login = ?, email = ?, senha_hash = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?",
+        )
+        .bind(adminNome, adminLogin, adminEmail || null, novoHash, dados.adminId, id)
+        .run();
+    } else {
+      await database
+        .prepare(
+          "UPDATE usuarios SET nome = ?, login = ?, email = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?",
+        )
+        .bind(adminNome, adminLogin, adminEmail || null, dados.adminId, id)
+        .run();
+    }
+  }
+
+  await database
+    .prepare(
+      'UPDATE empresas SET codigo = ?, razao_social = ?, nome_fantasia = ?, cnpj = ?, ativa = ? WHERE id = ?',
+    )
+    .bind(codigo, razao, fantasia || null, cnpj || null, ativa, id)
+    .run();
+
+  return { ok: true };
 }
 
 export async function criarSessaoUsuario(

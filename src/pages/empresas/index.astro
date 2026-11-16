@@ -1,14 +1,14 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
-import { registrarEmpresaComUsuario } from '../../lib/empresa-service';
+import { registrarEmpresaComUsuario, atualizarCadastroEmpresa } from '../../lib/empresa-service';
 import { formatDoc, str } from '../../lib/validate';
 
 const u = Astro.locals.user!;
 if (u.perfil !== 'admin' || u.empresaCodigo !== 'vanderltda') return Astro.redirect('/?erro=permissao');
 
 let erro = '';
-let ok = '';
+let ok = Astro.url.searchParams.get('ok') === 'editada' ? 'Dados da empresa atualizados com sucesso!' : '';
 let v: Record<string, string> = {};
 
 if (Astro.request.method === 'POST') {
@@ -26,12 +26,45 @@ if (Astro.request.method === 'POST') {
         .run();
       ok = 'Status da empresa atualizado!';
     }
+  } else if (acao === 'editar') {
+    const empId = Number(f.get('id')) || 0;
+    const adminId = Number(f.get('admin_id')) || 0;
+    const codigo = str(f, 'codigo', 30).toLowerCase();
+    const razao = str(f, 'razao');
+    const fantasia = str(f, 'fantasia');
+    const cnpj = str(f, 'cnpj', 25);
+    const ativa = empId === u.empresaId ? 1 : f.get('ativa') ? 1 : 0;
+
+    const adminNome = str(f, 'nome');
+    const adminLogin = str(f, 'login', 40).toLowerCase();
+    const adminEmail = str(f, 'email');
+    const adminNovaSenha = String(f.get('senha') ?? '');
+
+    const res = await atualizarCadastroEmpresa(db(), {
+      id: empId,
+      codigo,
+      razao,
+      fantasia,
+      cnpj,
+      ativa,
+      adminId: adminId > 0 ? adminId : undefined,
+      adminNome,
+      adminLogin,
+      adminEmail,
+      adminNovaSenha,
+    });
+
+    if (!res.ok) {
+      erro = res.erro ?? 'Erro ao atualizar dados da empresa.';
+    } else {
+      return Astro.redirect('/empresas?ok=editada');
+    }
   } else {
     v = {
       codigo: str(f, 'codigo', 30).toLowerCase(),
       razao: str(f, 'razao'),
       fantasia: str(f, 'fantasia'),
-      cnpj: str(f, 'cnpj', 20),
+      cnpj: str(f, 'cnpj', 25),
       nome: str(f, 'nome'),
       email: str(f, 'email'),
       login: str(f, 'login', 40).toLowerCase(),
@@ -57,6 +90,30 @@ if (Astro.request.method === 'POST') {
     }
   }
 }
+
+const editId = Number(Astro.url.searchParams.get('editar')) || 0;
+const editandoEmp = editId
+  ? await db()
+      .prepare('SELECT id, codigo, razao_social, nome_fantasia, cnpj, ativa FROM empresas WHERE id = ?')
+      .bind(editId)
+      .first<{
+        id: number;
+        codigo: string;
+        razao_social: string;
+        nome_fantasia: string | null;
+        cnpj: string | null;
+        ativa: number;
+      }>()
+  : null;
+
+const editandoAdmin = editandoEmp
+  ? await db()
+      .prepare(
+        "SELECT id, nome, login, email FROM usuarios WHERE empresa_id = ? ORDER BY CASE WHEN perfil = 'admin' THEN 0 ELSE 1 END, id ASC LIMIT 1",
+      )
+      .bind(editandoEmp.id)
+      .first<{ id: number; nome: string; login: string; email: string | null }>()
+  : null;
 
 const { results: empresas } = await db()
   .prepare(
@@ -84,25 +141,34 @@ const { results: empresas } = await db()
   <div class="row">
     <h1>🏢 Cadastro e Gestão de Empresas</h1>
     <span class="spacer"></span>
-    <span class="tag ok">Acesso Exclusivo Administrador</span>
+    <span class="tag ok">Acesso Exclusivo vanderltda</span>
   </div>
 
   {erro && <div class="msg err">{erro}</div>}
   {ok && <div class="msg ok">{ok}</div>}
 
   <div class="card">
-    <h2>Cadastrar Nova Empresa + Administrador Inicial</h2>
+    <h2>
+      {editandoEmp
+        ? `✏️ Editar Empresa #${editandoEmp.id} (${editandoEmp.codigo})`
+        : 'Cadastrar Nova Empresa + Administrador Inicial'}
+    </h2>
     <p class="muted" style="margin-top:0">
-      Crie uma nova empresa isolada no sistema com seu respectivo usuário administrador.
+      {editandoEmp
+        ? 'Altere os dados cadastrais da empresa e/ou do seu usuário administrador abaixo.'
+        : 'Crie uma nova empresa isolada no sistema com seu respectivo usuário administrador.'}
     </p>
+
     <form method="post" class="grid">
-      <input type="hidden" name="_acao" value="criar" />
+      <input type="hidden" name="_acao" value={editandoEmp ? 'editar' : 'criar'} />
+      {editandoEmp && <input type="hidden" name="id" value={editandoEmp.id} />}
+      {editandoAdmin && <input type="hidden" name="admin_id" value={editandoAdmin.id} />}
 
       <div class="c4">
         <label>Código da empresa * (usado no login e na URL da loja)</label>
         <input
           name="codigo"
-          value={v.codigo ?? ''}
+          value={editandoEmp ? editandoEmp.codigo : v.codigo ?? ''}
           required
           placeholder="Ex: minhaloja"
           pattern="[a-z0-9][a-z0-9-]{2,29}"
@@ -110,41 +176,97 @@ const { results: empresas } = await db()
       </div>
       <div class="c4">
         <label>CNPJ</label>
-        <input name="cnpj" value={v.cnpj ?? ''} placeholder="00.000.000/0000-00" />
+        <div class="row" style="gap:6px">
+          <input
+            name="cnpj"
+            id="inp-emp-cnpj"
+            value={editandoEmp ? formatDoc(editandoEmp.cnpj) : v.cnpj ?? ''}
+            placeholder="00.000.000/0000-00"
+          />
+          <button type="button" class="btn sec sm" id="btn-busca-cnpj" style="white-space:nowrap">
+            🔍 Consultar
+          </button>
+        </div>
       </div>
       <div class="c4">
         <label>Nome Fantasia</label>
-        <input name="fantasia" value={v.fantasia ?? ''} placeholder="Nome comercial da empresa" />
+        <input
+          name="fantasia"
+          id="inp-emp-fantasia"
+          value={editandoEmp ? editandoEmp.nome_fantasia ?? '' : v.fantasia ?? ''}
+          placeholder="Nome comercial da empresa"
+        />
       </div>
 
-      <div class="c12">
+      <div class={editandoEmp && editandoEmp.id !== u.empresaId ? 'c9' : 'c12'}>
         <label>Razão Social *</label>
-        <input name="razao" value={v.razao ?? ''} required placeholder="Razão Social completa" />
+        <input
+          name="razao"
+          id="inp-emp-razao"
+          value={editandoEmp ? editandoEmp.razao_social : v.razao ?? ''}
+          required
+          placeholder="Razão Social completa"
+        />
       </div>
 
+      {editandoEmp && editandoEmp.id !== u.empresaId && (
+        <div class="c3" style="display:flex;align-items:flex-end;padding-bottom:8px">
+          <label class="check">
+            <input type="checkbox" name="ativa" value="1" checked={editandoEmp.ativa === 1} />
+            Empresa ativa
+          </label>
+        </div>
+      )}
+
       <div class="c12">
-        <h3 style="margin:6px 0 0;font-size:15px">Dados do Usuário Administrador da Nova Empresa</h3>
+        <h3 style="margin:6px 0 0;font-size:15px">
+          {editandoEmp
+            ? 'Dados do Usuário Administrador Principal da Empresa'
+            : 'Dados do Usuário Administrador da Nova Empresa'}
+        </h3>
       </div>
 
       <div class="c4">
         <label>Nome completo do Administrador *</label>
-        <input name="nome" value={v.nome ?? ''} required />
+        <input
+          name="nome"
+          value={editandoAdmin ? editandoAdmin.nome : v.nome ?? ''}
+          required
+        />
       </div>
       <div class="c3">
         <label>Login do Administrador *</label>
-        <input name="login" value={v.login ?? ''} required autocomplete="off" />
+        <input
+          name="login"
+          value={editandoAdmin ? editandoAdmin.login : v.login ?? ''}
+          required
+          autocomplete="off"
+        />
       </div>
       <div class="c3">
         <label>E-mail</label>
-        <input name="email" type="email" value={v.email ?? ''} />
+        <input
+          name="email"
+          id="inp-emp-email"
+          type="email"
+          value={editandoAdmin ? editandoAdmin.email ?? '' : v.email ?? ''}
+        />
       </div>
       <div class="c2">
-        <label>Senha inicial * (mín. 8)</label>
-        <input name="senha" type="password" required minlength="8" autocomplete="new-password" />
+        <label>{editandoEmp ? 'Nova senha (opcional)' : 'Senha inicial * (mín. 8)'}</label>
+        <input
+          name="senha"
+          type="password"
+          required={!editandoEmp}
+          minlength="8"
+          placeholder={editandoEmp ? 'Manter atual' : ''}
+          autocomplete="new-password"
+        />
       </div>
 
-      <div class="c12 row">
-        <button>+ Criar Empresa e Administrador</button>
+      <div class="c12 row" style="gap:10px">
+        <button>{editandoEmp ? '💾 Salvar alterações da empresa' : '+ Criar Empresa e Administrador'}</button>
+        {editandoEmp && <a class="btn sec" href="/empresas">Cancelar edição</a>}
       </div>
     </form>
   </div>
@@ -167,7 +289,7 @@ const { results: empresas } = await db()
         </thead>
         <tbody>
           {empresas.map((e) => (
-            <tr>
+            <tr style={editandoEmp?.id === e.id ? 'background:#eff6ff' : ''}>
               <td>#{e.id}</td>
               <td>
                 <strong><code>{e.codigo}</code></strong>
@@ -198,15 +320,18 @@ const { results: empresas } = await db()
                 )}
               </td>
               <td class="num">
-                {e.id !== u.empresaId && (
-                  <form method="post" style="display:inline">
-                    <input type="hidden" name="_acao" value="alternar_status" />
-                    <input type="hidden" name="id" value={e.id} />
-                    <button class="sm sec">
-                      {e.ativa === 1 ? 'Desativar' : 'Ativar'}
-                    </button>
-                  </form>
-                )}
+                <div class="row" style="justify-content:flex-end;gap:6px">
+                  <a class="btn sm sec" href={`/empresas?editar=${e.id}`}>✏️ Editar</a>
+                  {e.id !== u.empresaId && (
+                    <form method="post" style="display:inline">
+                      <input type="hidden" name="_acao" value="alternar_status" />
+                      <input type="hidden" name="id" value={e.id} />
+                      <button class="sm sec">
+                        {e.ativa === 1 ? 'Desativar' : 'Ativar'}
+                      </button>
+                    </form>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
@@ -214,4 +339,41 @@ const { results: empresas } = await db()
       </table>
     </div>
   </div>
+
+  <script is:inline>
+    (function () {
+      const btn = document.getElementById('btn-busca-cnpj');
+      const inpCnpj = document.getElementById('inp-emp-cnpj');
+      const inpRazao = document.getElementById('inp-emp-razao');
+      const inpFantasia = document.getElementById('inp-emp-fantasia');
+      const inpEmail = document.getElementById('inp-emp-email');
+      if (!btn || !inpCnpj) return;
+
+      btn.addEventListener('click', async () => {
+        const doc = String(inpCnpj.value || '').replace(/[^0-9A-Za-z]/g, '');
+        if (doc.length !== 14) {
+          alert('Informe um CNPJ com 14 caracteres para consultar.');
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Consultando...';
+        try {
+          const resp = await fetch('/api/consulta-doc?doc=' + encodeURIComponent(doc));
+          const data = await resp.json();
+          if (!resp.ok || data.erro) {
+            alert(data.erro || 'Não foi possível consultar este CNPJ.');
+          } else {
+            if (data.nome && inpRazao) inpRazao.value = data.nome;
+            if (data.nome_fantasia && inpFantasia) inpFantasia.value = data.nome_fantasia;
+            if (data.email && inpEmail && !inpEmail.value) inpEmail.value = data.email;
+          }
+        } catch {
+          alert('Erro ao consultar CNPJ.');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🔍 Consultar';
+        }
+      });
+    })();
+  </script>
 </Layout>

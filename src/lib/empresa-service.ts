@@ -715,3 +715,174 @@ export function calcularFreteCorreios(params: {
     opcoes,
   };
 }
+
+function normalizarAsciiPix(texto: string, maxLen: number): string {
+  return String(texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+    .slice(0, maxLen);
+}
+
+function emvField(id: string, valor: string): string {
+  const len = String(valor.length).padStart(2, '0');
+  return `${id}${len}${valor}`;
+}
+
+function crc16Ccitt(payload: string): string {
+  let crc = 0xffff;
+  for (let i = 0; i < payload.length; i++) {
+    crc ^= payload.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xffff;
+      } else {
+        crc = (crc << 1) & 0xffff;
+      }
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+function normalizarChavePix(chaveRaw: string): string {
+  const raw = String(chaveRaw ?? '').trim();
+  if (!raw) return '';
+  // E-mail
+  if (raw.includes('@')) return raw.toLowerCase();
+  // Chave aleatória EVP (UUID)
+  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(raw)) {
+    return raw.toLowerCase();
+  }
+  // Telefone internacional explícito (+55...)
+  if (raw.startsWith('+')) {
+    return '+' + onlyDigits(raw);
+  }
+  // CPF (11 dígitos), CNPJ (14 dígitos) ou CNPJ alfanumérico
+  const digits = onlyDigits(raw);
+  if (digits.length === 11 || digits.length === 14) {
+    return digits;
+  }
+  return raw.replace(/\s+/g, '');
+}
+
+/**
+ * Gera o payload oficial BR Code (EMV QRCPS-MPM do Banco Central) para Pix Nubank ("Pix Copia e Cola" e QR Code)
+ */
+export function gerarPayloadPixNubank(params: {
+  chavePix: string;
+  nomeRecebedor: string;
+  cidadeRecebedor?: string | null;
+  valor?: number | null;
+  txid?: string | null;
+  descricao?: string | null;
+}): string {
+  const chave = normalizarChavePix(params.chavePix);
+  if (!chave) return '';
+
+  const nome = normalizarAsciiPix(params.nomeRecebedor || 'LOJA', 25) || 'LOJA';
+  const cidade = normalizarAsciiPix(params.cidadeRecebedor || 'SAO PAULO', 15) || 'SAO PAULO';
+  const txid =
+    String(params.txid ?? '***')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(0, 25) || '***';
+
+  let merchantAccount = emvField('00', 'br.gov.bcb.pix') + emvField('01', chave);
+  if (params.descricao) {
+    const desc = normalizarAsciiPix(params.descricao, 40);
+    if (desc) merchantAccount += emvField('02', desc);
+  }
+
+  const valorNum = Number(params.valor ?? 0);
+  const campoValor = valorNum > 0 ? emvField('54', valorNum.toFixed(2)) : '';
+  const campoAdicional = emvField('62', emvField('05', txid));
+
+  const semCrc =
+    emvField('00', '01') +
+    emvField('26', merchantAccount) +
+    emvField('52', '0000') +
+    emvField('53', '986') +
+    campoValor +
+    emvField('58', 'BR') +
+    emvField('59', nome) +
+    emvField('60', cidade) +
+    campoAdicional +
+    '6304';
+
+  return semCrc + crc16Ccitt(semCrc);
+}
+
+/**
+ * Integra com a API oficial NuPay for Business (ou retorna o link de pagamento Nubank configurado)
+ */
+export async function criarCheckoutNuPay(params: {
+  merchantKey?: string | null;
+  merchantToken?: string | null;
+  linkPadrao?: string | null;
+  pedidoId: number;
+  valorTotal: number;
+  clienteNome: string;
+  clienteDoc?: string | null;
+  clienteEmail?: string | null;
+  urlRetorno?: string;
+}): Promise<{ paymentUrl: string | null; origem: 'NUPAY_API' | 'LINK_PADRAO' | 'NENHUM' }> {
+  const mKey = String(params.merchantKey ?? '').trim();
+  const mTok = String(params.merchantToken ?? '').trim();
+
+  if (mKey && mTok) {
+    try {
+      const partesNome = String(params.clienteNome || 'Cliente Loja').trim().split(/\s+/);
+      const firstName = partesNome[0] || 'Cliente';
+      const lastName = partesNome.slice(1).join(' ') || 'Loja';
+
+      const resp = await fetch('https://api.spinpay.com.br/v1/checkouts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': mKey,
+          'X-Merchant-Token': mTok,
+        },
+        body: JSON.stringify({
+          merchantOrderReference: `PED-${params.pedidoId}`,
+          referenceId: `PED-${params.pedidoId}-${Date.now()}`,
+          amount: {
+            value: Number(params.valorTotal.toFixed(2)),
+            currency: 'BRL',
+          },
+          shopper: {
+            firstName,
+            lastName,
+            document: onlyDigits(String(params.clienteDoc ?? '')),
+            documentType: onlyDigits(String(params.clienteDoc ?? '')).length > 11 ? 'CNPJ' : 'CPF',
+            email: params.clienteEmail || 'cliente@loja.com.br',
+          },
+          paymentMethod: {
+            type: 'nupay',
+            authorizationType: 'manually_authorized',
+          },
+          PaymentFlow: {
+            returnUrl: params.urlRetorno || '',
+          },
+        }),
+      });
+
+      if (resp.ok) {
+        const data: any = await resp.json();
+        if (data?.paymentUrl) {
+          return { paymentUrl: String(data.paymentUrl), origem: 'NUPAY_API' };
+        }
+      }
+    } catch {
+      // Fallback para link padrão caso sem rede ou credenciais de sandbox
+    }
+  }
+
+  const linkPadrao = String(params.linkPadrao ?? '').trim();
+  if (linkPadrao && /^https?:\/\//i.test(linkPadrao)) {
+    return { paymentUrl: linkPadrao, origem: 'LINK_PADRAO' };
+  }
+
+  return { paymentUrl: null, origem: 'NENHUM' };
+}

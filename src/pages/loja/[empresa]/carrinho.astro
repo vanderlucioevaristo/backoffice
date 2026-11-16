@@ -1,7 +1,7 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
-import { calcularFreteCorreios } from '../../../lib/empresa-service';
+import { calcularFreteCorreios, gerarPayloadPixNubank, criarCheckoutNuPay } from '../../../lib/empresa-service';
 import { formatMoney, formatQty, nowLocalIso, onlyDigits, parseNum, str } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -41,7 +41,15 @@ const dadosCliente = await db()
 let cepEntrega = onlyDigits(dadosCliente?.cep ?? '');
 let erro = '';
 let pedidoConcluidoId = 0;
-let resumoPedidoConcluido: { freteModalidade: string; valorFrete: number; valorTotal: number; prazoDias: number } | null = null;
+let resumoPedidoConcluido: {
+  freteModalidade: string;
+  valorFrete: number;
+  valorTotal: number;
+  prazoDias: number;
+  formaPagamento: string;
+  pixCopiaCola: string | null;
+  linkPagamento: string | null;
+} | null = null;
 const agora = nowLocalIso();
 
 if (Astro.request.method === 'POST') {
@@ -154,14 +162,15 @@ if (Astro.request.method === 'POST') {
     }
 
     if (!erro) {
+      const formaPagamento = String(f.get('forma_pagamento') ?? 'PIX_NUBANK');
       const subtotalProdutos = cartItens.reduce((acc, it) => acc + it.quantidade * it.preco_venda, 0);
       const valorTotal = Math.round((subtotalProdutos + valorFrete) * 100) / 100;
 
       const ped = await db()
         .prepare(
           `INSERT INTO loja_pedidos
-             (empresa_id, parceiro_id, valor_total, valor_frete, frete_modalidade, frete_prazo_dias, cep_entrega, observacoes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+             (empresa_id, parceiro_id, valor_total, valor_frete, frete_modalidade, frete_prazo_dias, cep_entrega, forma_pagamento, pagamento_status, observacoes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDENTE', ?) RETURNING id`,
         )
         .bind(
           empresa.id,
@@ -171,16 +180,61 @@ if (Astro.request.method === 'POST') {
           freteModalidade,
           fretePrazoDias,
           cepEntrega || null,
+          formaPagamento,
           obs || null,
         )
         .first<{ id: number }>();
 
       pedidoConcluidoId = ped!.id;
+
+      // Gera automaticamente o Pix Copia e Cola Nubank (padrão BR Code) e/ou Link NuPay somente quando habilitados na loja
+      const pixHabilitado = empresa.nubank_pix_ativo === 1;
+      const linkHabilitado = empresa.nubank_link_ativo === 1;
+
+      const chavePixAtiva = empresa.nubank_chave_pix || empresa.cnpj || '';
+      const pixCopiaCola =
+        pixHabilitado && chavePixAtiva
+          ? gerarPayloadPixNubank({
+              chavePix: chavePixAtiva,
+              nomeRecebedor: empresa.razao_social || empresa.nome,
+              cidadeRecebedor: empresa.nubank_cidade_pix || 'SAO PAULO',
+              valor: valorTotal,
+              txid: `PEDIDO${pedidoConcluidoId}`,
+              descricao: `Pedido ${pedidoConcluidoId}`,
+            })
+          : null;
+
+      const checkoutNu = linkHabilitado
+        ? await criarCheckoutNuPay({
+            merchantKey: empresa.nupay_merchant_key,
+            merchantToken: empresa.nupay_merchant_token,
+            linkPadrao: empresa.nubank_link_padrao,
+            pedidoId: pedidoConcluidoId,
+            valorTotal,
+            clienteNome: cliente.nome,
+            clienteDoc: cliente.documento,
+            clienteEmail: cliente.email,
+            urlRetorno: `${Astro.url.origin}/loja/${empCodigo}/meus-pedidos`,
+          })
+        : { paymentUrl: null, origem: 'NENHUM' as const };
+
+      await db()
+        .prepare(
+          `UPDATE loja_pedidos
+              SET nubank_pix_copia_cola = ?, nubank_link_pagamento = ?
+            WHERE id = ? AND empresa_id = ?`,
+        )
+        .bind(pixCopiaCola || null, checkoutNu.paymentUrl || null, pedidoConcluidoId, empresa.id)
+        .run();
+
       resumoPedidoConcluido = {
         freteModalidade,
         valorFrete,
         valorTotal,
         prazoDias: fretePrazoDias,
+        formaPagamento,
+        pixCopiaCola: pixCopiaCola || null,
+        linkPagamento: checkoutNu.paymentUrl || null,
       };
 
       for (const it of cartItens) {
@@ -347,6 +401,70 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
           <div><strong>Total Final do Pedido:</strong> <span style="color:var(--pr);font-weight:800">R$ {formatMoney(resumoPedidoConcluido.valorTotal)}</span></div>
         </div>
       )}
+
+      {resumoPedidoConcluido && (resumoPedidoConcluido.pixCopiaCola || resumoPedidoConcluido.linkPagamento) && (
+        <div style="padding:18px;background:#faf5ff;border:2px solid #820ad1;border-radius:14px;margin:16px 0">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="background:#820ad1;color:#fff;font-weight:800;padding:4px 10px;border-radius:99px;font-size:12px">
+              Nubank
+            </span>
+            <h3 style="margin:0;color:#581c87;font-size:17px">
+              💜 Pagamento do Pedido #{pedidoConcluidoId} — R$ {formatMoney(resumoPedidoConcluido.valorTotal)}
+            </h3>
+          </div>
+
+          {resumoPedidoConcluido.linkPagamento && (
+            <div style="margin-bottom:14px">
+              <a
+                href={resumoPedidoConcluido.linkPagamento}
+                target="_blank"
+                rel="noopener"
+                class="btn"
+                style="background:#820ad1;color:#fff;font-weight:700;padding:11px 18px;border-radius:8px;display:inline-flex;align-items:center;gap:8px"
+              >
+                💜 Pagar agora pelo Link do Nubank / NuPay ↗
+              </a>
+            </div>
+          )}
+
+          {resumoPedidoConcluido.pixCopiaCola && (
+            <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;background:#fff;padding:14px;border-radius:10px;border:1px solid #e9d5ff">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(resumoPedidoConcluido.pixCopiaCola)}`}
+                alt="QR Code Pix Nubank"
+                width="140"
+                height="140"
+                style="border:1px solid #e2e8f0;border-radius:8px;padding:4px;background:#fff"
+              />
+              <div style="flex:1;min-width:240px">
+                <strong style="color:#581c87;display:block;margin-bottom:4px">
+                  Pix Nubank (QR Code ou Copia e Cola)
+                </strong>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                  Abra o app do seu banco ou Nubank, escolha <strong>Pix Copia e Cola</strong> ou escaneie o QR Code ao lado. O valor de <strong>R$ {formatMoney(resumoPedidoConcluido.valorTotal)}</strong> já está incluído!
+                </p>
+                <div class="row" style="gap:8px">
+                  <input
+                    id="inp-pix-concluido"
+                    readonly
+                    value={resumoPedidoConcluido.pixCopiaCola}
+                    onclick="this.select()"
+                    style="font-size:11.5px;font-family:monospace;background:#f8fafc"
+                  />
+                  <button
+                    type="button"
+                    class="btn"
+                    style="background:#820ad1;white-space:nowrap"
+                    onclick="navigator.clipboard.writeText(document.getElementById('inp-pix-concluido').value);this.textContent='✓ Código Pix Copiado!';"
+                  >
+                    📋 Copiar Pix Nubank
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <div class="row" style="gap:10px">
         <a class="btn" href={`${baseUrl}/meus-pedidos`}>Ver Meus Pedidos</a>
         <a class="btn sec" href={baseUrl}>Voltar à loja</a>
@@ -504,6 +622,39 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
             )}
           </div>
         </div>
+
+        <!-- Seleção de Forma de Pagamento Nubank (exibe apenas as opções habilitadas em Minha Loja) -->
+        {(empresa.nubank_pix_ativo === 1 || empresa.nubank_link_ativo === 1) && (
+          <div class="frete-box" style="border-color:#e9d5ff;background:#faf5ff">
+            <h3 style="margin:0 0 6px;font-size:16px;color:#581c87">💜 Forma de Pagamento (Nubank)</h3>
+            <div class="frete-opcoes" style="margin-top:8px">
+              {empresa.nubank_pix_ativo === 1 && (
+                <label class="frete-card ativo" style="border-color:#c084fc">
+                  <input type="radio" name="forma_pagamento" value="PIX_NUBANK" checked style="width:auto" />
+                  <div>
+                    <div style="font-weight:700;color:#581c87">💠 Pix Nubank (QR Code + Copia e Cola)</div>
+                    <div class="muted" style="font-size:12px">Gera na hora o QR Code e código Pix com o valor exato do pedido</div>
+                  </div>
+                </label>
+              )}
+              {empresa.nubank_link_ativo === 1 && (
+                <label class={`frete-card ${empresa.nubank_pix_ativo !== 1 ? 'ativo' : ''}`} style="border-color:#c084fc">
+                  <input
+                    type="radio"
+                    name="forma_pagamento"
+                    value="LINK_NUBANK"
+                    checked={empresa.nubank_pix_ativo !== 1}
+                    style="width:auto"
+                  />
+                  <div>
+                    <div style="font-weight:700;color:#581c87">💜 Link de Pagamento Nubank / NuPay</div>
+                    <div class="muted" style="font-size:12px">Pague pelo link oficial do Nubank (Cartão, NuPay ou Pix)</div>
+                  </div>
+                </label>
+              )}
+            </div>
+          </div>
+        )}
 
         <div class="grid">
           <div class="c7">

@@ -327,6 +327,17 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE loja_pedidos ADD COLUMN frete_modalidade TEXT",
       "ALTER TABLE loja_pedidos ADD COLUMN frete_prazo_dias INTEGER",
       "ALTER TABLE loja_pedidos ADD COLUMN cep_entrega TEXT",
+      "ALTER TABLE empresas ADD COLUMN nubank_pix_ativo INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE empresas ADD COLUMN nubank_link_ativo INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE empresas ADD COLUMN nubank_chave_pix TEXT",
+      "ALTER TABLE empresas ADD COLUMN nubank_cidade_pix TEXT DEFAULT 'SAO PAULO'",
+      "ALTER TABLE empresas ADD COLUMN nubank_link_padrao TEXT",
+      "ALTER TABLE empresas ADD COLUMN nupay_merchant_key TEXT",
+      "ALTER TABLE empresas ADD COLUMN nupay_merchant_token TEXT",
+      "ALTER TABLE loja_pedidos ADD COLUMN forma_pagamento TEXT DEFAULT 'PIX_NUBANK'",
+      "ALTER TABLE loja_pedidos ADD COLUMN pagamento_status TEXT NOT NULL DEFAULT 'PENDENTE'",
+      "ALTER TABLE loja_pedidos ADD COLUMN nubank_pix_copia_cola TEXT",
+      "ALTER TABLE loja_pedidos ADD COLUMN nubank_link_pagamento TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -458,6 +469,13 @@ export type LojaEmpresa = {
   agenda_dias_semana: string;
   agenda_datas_fechadas: string | null;
   cep_origem: string | null;
+  nubank_pix_ativo: number;
+  nubank_link_ativo: number;
+  nubank_chave_pix: string | null;
+  nubank_cidade_pix: string | null;
+  nubank_link_padrao: string | null;
+  nupay_merchant_key: string | null;
+  nupay_merchant_token: string | null;
 };
 
 export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null> {
@@ -476,7 +494,14 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               COALESCE(agenda_intervalo_min, 30) AS agenda_intervalo_min,
               COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
               agenda_datas_fechadas,
-              COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem
+              COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem,
+              COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
+              COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
+              nubank_chave_pix,
+              COALESCE(NULLIF(nubank_cidade_pix, ''), 'SAO PAULO') AS nubank_cidade_pix,
+              nubank_link_padrao,
+              nupay_merchant_key,
+              nupay_merchant_token
          FROM empresas
         WHERE codigo = ? AND ativa = 1`,
     )

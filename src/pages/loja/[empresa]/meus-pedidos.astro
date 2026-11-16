@@ -27,7 +27,10 @@ Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
 const { results: pedidos } = await db()
   .prepare(
     `SELECT id, valor_total, COALESCE(valor_frete, 0) AS valor_frete,
-            frete_modalidade, frete_prazo_dias, cep_entrega, status, observacoes, criado_em
+            frete_modalidade, frete_prazo_dias, cep_entrega,
+            COALESCE(pagamento_status, 'PENDENTE') AS pagamento_status,
+            nubank_pix_copia_cola, nubank_link_pagamento,
+            status, observacoes, criado_em
        FROM loja_pedidos
       WHERE empresa_id = ? AND parceiro_id = ?
       ORDER BY id DESC`,
@@ -40,6 +43,9 @@ const { results: pedidos } = await db()
     frete_modalidade: string | null;
     frete_prazo_dias: number | null;
     cep_entrega: string | null;
+    pagamento_status: string;
+    nubank_pix_copia_cola: string | null;
+    nubank_link_pagamento: string | null;
     status: string;
     observacoes: string | null;
     criado_em: string;
@@ -101,6 +107,11 @@ const baseUrl = `/loja/${empCodigo}`;
             <span class={st.cls} style={ped.status === 'entregue' ? 'background:#dcfce7;color:#166534' : ''}>
               {st.txt}
             </span>
+            {ped.pagamento_status === 'PAGO' ? (
+              <span class="tag ok" style="background:#dcfce7;color:#166534">💜 Pago</span>
+            ) : ped.status !== 'cancelado' ? (
+              <span class="tag warn">💜 Aguardando Pagamento</span>
+            ) : null}
             {ped.frete_modalidade && (
               <span class="muted" style="font-size:12.5px">
                 🚚 {ped.frete_modalidade}: <strong>{ped.valor_frete > 0 ? `R$ ${formatMoney(ped.valor_frete)}` : 'Grátis'}</strong>
@@ -110,6 +121,46 @@ const baseUrl = `/loja/${empCodigo}`;
             <span class="spacer"></span>
             <strong style="font-size:17px;color:var(--pr)">R$ {formatMoney(ped.valor_total)}</strong>
           </div>
+
+          {ped.status !== 'cancelado' &&
+            ped.pagamento_status !== 'PAGO' &&
+            ((empresa.nubank_link_ativo === 1 && ped.nubank_link_pagamento) ||
+              (empresa.nubank_pix_ativo === 1 && ped.nubank_pix_copia_cola)) && (
+            <div style="margin-bottom:12px;padding:12px 14px;background:#faf5ff;border:1.5px solid #c084fc;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="background:#820ad1;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:99px">
+                  Nubank
+                </span>
+                <strong style="color:#581c87;font-size:13.5px">
+                  Opções de pagamento para este pedido (R$ {formatMoney(ped.valor_total)}):
+                </strong>
+              </div>
+              <div class="row" style="gap:8px;margin:0">
+                {empresa.nubank_link_ativo === 1 && ped.nubank_link_pagamento && (
+                  <a
+                    href={ped.nubank_link_pagamento}
+                    target="_blank"
+                    rel="noopener"
+                    class="btn sm"
+                    style="background:#820ad1;color:#fff;font-weight:700"
+                  >
+                    💜 Pagar pelo Link do Nubank ↗
+                  </a>
+                )}
+                {empresa.nubank_pix_ativo === 1 && ped.nubank_pix_copia_cola && (
+                  <button
+                    type="button"
+                    class="btn sm sec"
+                    style="border-color:#820ad1;color:#581c87;font-weight:700"
+                    data-pix={ped.nubank_pix_copia_cola}
+                    onclick="navigator.clipboard.writeText(this.getAttribute('data-pix'));this.textContent='✓ Pix Nubank Copiado!';"
+                  >
+                    📋 Copiar Pix Nubank (Copia e Cola)
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <div class="tbl-wrap">
             <table>
               <thead>

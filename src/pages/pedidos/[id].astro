@@ -2,7 +2,8 @@
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
 import { enviarEmailStatusPedido, STATUS_PEDIDO_INFO } from '../../lib/email';
-import { formatDoc, formatMoney, formatQty } from '../../lib/validate';
+import { gerarPayloadPixNubank, criarCheckoutNuPay } from '../../lib/empresa-service';
+import { formatDoc, formatMoney, formatQty, str } from '../../lib/validate';
 
 const u = Astro.locals.user!;
 const id = Number(Astro.params.id);
@@ -41,6 +42,70 @@ const { results: itens } = await db()
 
 if (Astro.request.method === 'POST') {
   const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? 'status');
+
+  if (acao === 'salvar_pagamento_nubank') {
+    const pagamentoStatus = String(f.get('pagamento_status') ?? 'PENDENTE');
+    let linkPag = str(f, 'nubank_link_pagamento', 500);
+    const gerarPix = f.get('gerar_pix_nubank') === '1';
+    const gerarNuPay = f.get('gerar_nupay_api') === '1';
+
+    const empRow = await db()
+      .prepare('SELECT razao_social, nome_fantasia, cnpj, nubank_chave_pix, nubank_cidade_pix, nubank_link_padrao, nupay_merchant_key, nupay_merchant_token FROM empresas WHERE id = ?')
+      .bind(u.empresaId)
+      .first<any>();
+
+    let pixCode = pedido.nubank_pix_copia_cola;
+    if (gerarPix || !pixCode) {
+      const chave = empRow?.nubank_chave_pix || empRow?.cnpj || '';
+      if (chave) {
+        pixCode = gerarPayloadPixNubank({
+          chavePix: chave,
+          nomeRecebedor: empRow?.razao_social || u.empresaNome,
+          cidadeRecebedor: empRow?.nubank_cidade_pix || 'SAO PAULO',
+          valor: Number(pedido.valor_total || 0),
+          txid: `PEDIDO${id}`,
+          descricao: `Pedido ${id}`,
+        });
+      }
+    }
+
+    if (gerarNuPay) {
+      const nu = await criarCheckoutNuPay({
+        merchantKey: empRow?.nupay_merchant_key,
+        merchantToken: empRow?.nupay_merchant_token,
+        linkPadrao: empRow?.nubank_link_padrao,
+        pedidoId: id,
+        valorTotal: Number(pedido.valor_total || 0),
+        clienteNome: String(pedido.cliente_nome || 'Cliente'),
+        clienteDoc: pedido.cliente_doc,
+        clienteEmail: pedido.cliente_email,
+        urlRetorno: `${Astro.url.origin}/loja/${u.empresaCodigo}/meus-pedidos`,
+      });
+      if (nu.paymentUrl) linkPag = nu.paymentUrl;
+    }
+
+    await db()
+      .prepare(
+        `UPDATE loja_pedidos
+            SET pagamento_status = ?,
+                nubank_link_pagamento = ?,
+                nubank_pix_copia_cola = ?,
+                atualizado_em = datetime('now')
+          WHERE id = ? AND empresa_id = ?`,
+      )
+      .bind(
+        ['PENDENTE', 'PAGO', 'CANCELADO'].includes(pagamentoStatus) ? pagamentoStatus : 'PENDENTE',
+        linkPag || null,
+        pixCode || null,
+        id,
+        u.empresaId,
+      )
+      .run();
+
+    return Astro.redirect(`/pedidos/${id}?ok=nubank`);
+  }
+
   const novoStatus = String(f.get('status') ?? '');
 
   if (['novo', 'separacao', 'entregue', 'cancelado'].includes(novoStatus) && novoStatus !== pedido.status) {
@@ -193,6 +258,11 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
     <a class="btn sec" href="/pedidos">← Voltar para pedidos</a>
   </div>
   {erro && <div class="msg err">{erro}</div>}
+  {ok === 'nubank' && (
+    <div class="msg ok">
+      💜 Dados de pagamento Nubank (Link de Cobrança e Pix Copia e Cola) atualizados com sucesso! O cliente já pode visualizar em "Meus Pedidos".
+    </div>
+  )}
   {ok === 'status' && emailFlag === 'enviado' && (
     <div class="msg ok">
       ✅ Situação do pedido atualizada e <strong>e-mail de notificação enviado</strong> para{' '}
@@ -251,6 +321,83 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
         <button style="width:100%">Atualizar situação</button>
       </form>
     </div>
+  </div>
+
+  <div class="card" style="border-left:4px solid #820ad1">
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin:0;color:#820ad1">💜 Pagamento Nubank (Link de Cobrança, NuPay e Pix)</h2>
+      <span class="spacer"></span>
+      {pedido.pagamento_status === 'PAGO' ? (
+        <span class="tag ok" style="background:#dcfce7;color:#166534;font-weight:700">✓ Pagamento Confirmado</span>
+      ) : (
+        <span class="tag warn" style="font-weight:700">⏳ Aguardando Pagamento (R$ {formatMoney(pedido.valor_total)})</span>
+      )}
+    </div>
+
+    <form method="post" class="grid">
+      <input type="hidden" name="_acao" value="salvar_pagamento_nubank" />
+
+      <div class="c3">
+        <label>Status do Pagamento</label>
+        <select name="pagamento_status">
+          <option value="PENDENTE" selected={(pedido.pagamento_status ?? 'PENDENTE') === 'PENDENTE'}>⏳ Pendente / Aguardando</option>
+          <option value="PAGO" selected={pedido.pagamento_status === 'PAGO'}>✓ Pago / Recebido no Nubank</option>
+          <option value="CANCELADO" selected={pedido.pagamento_status === 'CANCELADO'}>✕ Cancelado</option>
+        </select>
+      </div>
+
+      <div class="c9">
+        <label>Link de Pagamento Nubank PJ / NuPay (cole aqui o link gerado no app Nubank ou gere via NuPay)</label>
+        <div class="row" style="gap:8px">
+          <input
+            name="nubank_link_pagamento"
+            value={pedido.nubank_link_pagamento ?? ''}
+            placeholder="Ex: https://nubank.com.br/cobrar/..."
+          />
+          {pedido.nubank_link_pagamento && (
+            <a
+              href={pedido.nubank_link_pagamento}
+              target="_blank"
+              rel="noopener"
+              class="btn sec sm"
+              style="white-space:nowrap;border-color:#820ad1;color:#820ad1"
+            >
+              Abrir Link ↗
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div class="c12">
+        <label>Código Pix Copia e Cola Nubank (gerado automaticamente com o valor de R$ {formatMoney(pedido.valor_total)})</label>
+        <div class="row" style="gap:8px">
+          <input
+            id="inp-pix-admin"
+            readonly
+            value={pedido.nubank_pix_copia_cola ?? 'Clique em "Gerar/Atualizar Pix Nubank" abaixo (configure sua Chave Pix em Minha Loja)'}
+            onclick="this.select()"
+            style="font-family:monospace;font-size:12px;background:#faf5ff"
+          />
+          {pedido.nubank_pix_copia_cola && (
+            <button
+              type="button"
+              class="btn sec sm"
+              style="white-space:nowrap"
+              onclick="navigator.clipboard.writeText(document.getElementById('inp-pix-admin').value);this.textContent='✓ Copiado!';"
+            >
+              📋 Copiar Pix
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div class="c12 row" style="gap:10px">
+        <button style="background:#820ad1">💜 Salvar Pagamento Nubank</button>
+        <button name="gerar_pix_nubank" value="1" class="sec">🔄 Gerar / Atualizar Pix Nubank</button>
+        <button name="gerar_nupay_api" value="1" class="sec">⚡ Gerar Checkout NuPay</button>
+        <a class="btn sec" href="/loja-config">⚙️ Configurar Chave Pix / NuPay</a>
+      </div>
+    </form>
   </div>
 
   <div class="card">

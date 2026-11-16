@@ -16,6 +16,7 @@ import {
   listarVisaoAgendaCliente,
   contarNotificacoesAgendamentoBackoffice,
   calcularFreteCorreios,
+  gerarPayloadPixNubank,
   IDLE_TIMEOUT_MS,
 } from '../src/lib/empresa-service.ts';
 
@@ -435,5 +436,23 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(cotacaoDistante.ok, true);
     const pacDistante = cotacaoDistante.opcoes.find((o) => o.codigo === 'PAC')!;
     assert.ok(pacDistante.valor > pacLocal.valor, 'Frete interestadual distante deve ser maior que o estadual');
+  });
+
+  test('gera código Pix Copia e Cola (BR Code EMV com CRC16) válido para conta Nubank com valor do pedido', () => {
+    const payload = gerarPayloadPixNubank({
+      chavePix: '65.491.970/0001-82',
+      nomeRecebedor: 'VANDER EVARISTO LTDA',
+      cidadeRecebedor: 'São Paulo',
+      valor: 189.9,
+      txid: 'PEDIDO42',
+    });
+
+    // Deve começar com 000201 e conter br.gov.bcb.pix, a chave limpa, o valor 189.90, o txid PEDIDO42 e o CRC16 (6304 + 4 hex)
+    assert.match(payload, /^000201/);
+    assert.ok(payload.includes('br.gov.bcb.pix'));
+    assert.ok(payload.includes('65491970000182'));
+    assert.ok(payload.includes('5406189.90'));
+    assert.ok(payload.includes('PEDIDO42'));
+    assert.match(payload, /6304[0-9A-F]{4}$/);
   });
 });

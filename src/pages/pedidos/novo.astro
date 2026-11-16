@@ -1,14 +1,14 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
-import { str, parseNum, formatDoc, formatQty } from '../../lib/validate';
+import { str, onlyDigits, parseNum, formatDoc, formatQty } from '../../lib/validate';
 
 const u = Astro.locals.user!;
 
 const { results: clientes } = await db()
-  .prepare('SELECT id, nome, documento FROM parceiros WHERE empresa_id = ? AND eh_cliente = 1 AND ativo = 1 ORDER BY nome COLLATE NOCASE')
+  .prepare('SELECT id, nome, documento, cep FROM parceiros WHERE empresa_id = ? AND eh_cliente = 1 AND ativo = 1 ORDER BY nome COLLATE NOCASE')
   .bind(u.empresaId)
-  .all<{ id: number; nome: string; documento: string | null }>();
+  .all<{ id: number; nome: string; documento: string | null; cep: string | null }>();
 
 const { results: produtos } = await db()
   .prepare('SELECT id, codigo, nome, unidade, preco_custo, preco_venda, estoque_atual FROM produtos WHERE empresa_id = ? AND ativo = 1 AND estoque_atual >= 1 ORDER BY nome COLLATE NOCASE')
@@ -67,15 +67,31 @@ if (Astro.request.method === 'POST') {
   }
 
   if (!erro) {
+    const valorFrete = Math.max(0, parseNum(f.get('valor_frete'), 0));
+    const freteModalidade = str(f, 'frete_modalidade', 60);
+    const fretePrazoDias = Number(f.get('frete_prazo_dias')) || null;
+    const cepEntrega = onlyDigits(str(f, 'cep_entrega', 15));
+
     const subtotalItens = itens.reduce((acc, it) => acc + it.quantidade * it.preco_unitario, 0);
-    const totalPedido = Math.max(0, subtotalItens - valorDesconto);
+    const totalPedido = Math.max(0, subtotalItens + valorFrete - valorDesconto);
 
     const ped = await db()
       .prepare(
-        `INSERT INTO loja_pedidos (empresa_id, parceiro_id, valor_total, valor_desconto, observacoes, status, origem)
-         VALUES (?, ?, ?, ?, ?, 'novo', 'INTERNO') RETURNING id`,
+        `INSERT INTO loja_pedidos
+           (empresa_id, parceiro_id, valor_total, valor_desconto, valor_frete, frete_modalidade, frete_prazo_dias, cep_entrega, observacoes, status, origem)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', 'INTERNO') RETURNING id`,
       )
-      .bind(u.empresaId, parceiroId, totalPedido, valorDesconto, observacoes || null)
+      .bind(
+        u.empresaId,
+        parceiroId,
+        totalPedido,
+        valorDesconto,
+        valorFrete,
+        freteModalidade || null,
+        fretePrazoDias,
+        cepEntrega || null,
+        observacoes || null,
+      )
       .first<{ id: number }>();
 
     const pedidoId = ped!.id;
@@ -140,11 +156,11 @@ const rowsToRender: ItemPed[] = itens.length > 0 ? itens : [{ produto_id: 0, qua
       <div class="grid">
         <div class="c8">
           <label>Cliente *</label>
-          <select name="parceiro_id" required>
+          <select name="parceiro_id" id="sel-cliente" required>
             <option value="">— Selecione o cliente —</option>
             {clientes.map((c) => (
-              <option value={c.id} selected={parceiroId === c.id}>
-                {c.nome}{c.documento ? ` (${formatDoc(c.documento)})` : ''}
+              <option value={c.id} data-cep={c.cep ?? ''} selected={parceiroId === c.id}>
+                {c.nome}{c.documento ? ` (${formatDoc(c.documento)})` : ''}{c.cep ? ` · CEP ${c.cep}` : ''}
               </option>
             ))}
           </select>
@@ -198,6 +214,36 @@ const rowsToRender: ItemPed[] = itens.length > 0 ? itens : [{ produto_id: 0, qua
     </div>
 
     <div class="card">
+      <h2>🚚 Cálculo de Frete via Correios</h2>
+      <div class="grid">
+        <div class="c3">
+          <label>CEP de entrega</label>
+          <div class="row" style="gap:6px">
+            <input name="cep_entrega" id="inp-cep-ped" placeholder="00000-000" maxlength="9" />
+            <button type="button" class="btn sec" id="btn-calc-frete-ped" style="white-space:nowrap">📦 Calcular</button>
+          </div>
+        </div>
+        <div class="c5">
+          <label>Modalidade de entrega (Correios)</label>
+          <select id="sel-frete-op">
+            <option value="0||Retirada na Loja||1">🏪 Retirada na Loja — Grátis (R$ 0,00)</option>
+          </select>
+          <input type="hidden" name="frete_modalidade" id="inp-frete-mod" value="Retirada na Loja" />
+          <input type="hidden" name="frete_prazo_dias" id="inp-frete-prazo" value="1" />
+        </div>
+        <div class="c4">
+          <label>Valor do Frete (R$)</label>
+          <input name="valor_frete" id="inp-frete-val" type="number" step="0.01" min="0" value="0" />
+        </div>
+        <div class="c12">
+          <small class="muted" id="info-frete-ped">
+            Selecione o cliente (ou digite o CEP) e clique em "📦 Calcular" para obter os valores de PAC e SEDEX pelos Correios.
+          </small>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="grid">
         <div class="c6">
           <label>Observações do pedido</label>
@@ -225,6 +271,14 @@ const rowsToRender: ItemPed[] = itens.length > 0 ? itens : [{ produto_id: 0, qua
   const tbody = document.getElementById('tbody-it');
   const btnAdd = document.getElementById('btn-add-it');
   const inpDesc = document.getElementById('inp-desc');
+  const inpFreteVal = document.getElementById('inp-frete-val');
+  const inpFreteMod = document.getElementById('inp-frete-mod');
+  const inpFretePrazo = document.getElementById('inp-frete-prazo');
+  const selFreteOp = document.getElementById('sel-frete-op');
+  const selCliente = document.getElementById('sel-cliente');
+  const inpCepPed = document.getElementById('inp-cep-ped');
+  const btnCalcFretePed = document.getElementById('btn-calc-frete-ped');
+  const infoFretePed = document.getElementById('info-frete-ped');
   const totPed = document.getElementById('tot-ped');
   const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -238,7 +292,102 @@ const rowsToRender: ItemPed[] = itens.length > 0 ? itens : [{ produto_id: 0, qua
       tr.querySelector('.inp-sub').value = fmt(sub);
     });
     const d = parseFloat(inpDesc.value) || 0;
-    totPed.value = fmt(Math.max(0, soma - d));
+    const f = parseFloat(inpFreteVal.value) || 0;
+    totPed.value = fmt(Math.max(0, soma + f - d));
+  }
+
+  if (selCliente && inpCepPed) {
+    selCliente.addEventListener('change', () => {
+      const opt = selCliente.selectedOptions[0];
+      if (opt && opt.dataset.cep) {
+        inpCepPed.value = opt.dataset.cep;
+      }
+    });
+  }
+
+  if (selFreteOp) {
+    selFreteOp.addEventListener('change', () => {
+      const partes = String(selFreteOp.value || '').split('||');
+      inpFreteVal.value = parseFloat(partes[0] || '0').toFixed(2);
+      inpFreteMod.value = partes[1] || 'Correios';
+      inpFretePrazo.value = partes[2] || '1';
+      recalc();
+    });
+  }
+  if (inpFreteVal) inpFreteVal.addEventListener('input', recalc);
+
+  if (btnCalcFretePed && inpCepPed) {
+    btnCalcFretePed.addEventListener('click', async () => {
+      const cep = String(inpCepPed.value || '').replace(/\D/g, '');
+      if (cep.length !== 8) {
+        infoFretePed.textContent = 'Informe um CEP válido com 8 dígitos.';
+        return;
+      }
+      const itensReq = [];
+      tbody.querySelectorAll('tr.it-row').forEach((tr) => {
+        const pid = Number(tr.querySelector('.sel-prod').value) || 0;
+        const qtd = parseFloat(tr.querySelector('.inp-qtd').value) || 0;
+        const prc = parseFloat(tr.querySelector('.inp-preco').value) || 0;
+        if (pid > 0 && qtd > 0) {
+          itensReq.push({ produtoId: pid, quantidade: qtd, precoUnitario: prc });
+        }
+      });
+      if (itensReq.length === 0) {
+        infoFretePed.textContent = 'Selecione pelo menos um produto acima antes de calcular o frete.';
+        return;
+      }
+      btnCalcFretePed.disabled = true;
+      btnCalcFretePed.textContent = '...';
+      try {
+        const resp = await fetch('/api/calcular-frete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cepDestino: cep, itens: itensReq }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          infoFretePed.textContent = data.erro || 'Erro ao calcular frete.';
+        } else {
+          selFreteOp.innerHTML = data.opcoes
+            .map(
+              (op) =>
+                '<option value="' +
+                op.valor +
+                '||' +
+                op.nome +
+                '||' +
+                op.prazoDias +
+                '">' +
+                op.nome +
+                ' — R$ ' +
+                fmt(op.valor) +
+                ' (' +
+                op.prazoDias +
+                'd úteis)</option>',
+            )
+            .join('');
+          selFreteOp.dispatchEvent(new Event('change'));
+          infoFretePed.textContent =
+            'Peso físico: ' +
+            data.pesoFisicoKg +
+            ' kg · Peso cúbico: ' +
+            data.pesoCubicoKg +
+            ' kg · Caixa: ' +
+            data.dimensoesPacoteCm.comprimento +
+            '×' +
+            data.dimensoesPacoteCm.largura +
+            '×' +
+            data.dimensoesPacoteCm.altura +
+            ' cm' +
+            (data.localidadeDestino ? ' · Destino: ' + data.localidadeDestino : '');
+        }
+      } catch {
+        infoFretePed.textContent = 'Erro ao consultar frete.';
+      } finally {
+        btnCalcFretePed.disabled = false;
+        btnCalcFretePed.textContent = '📦 Calcular';
+      }
+    });
   }
 
   tbody.addEventListener('change', (e) => {

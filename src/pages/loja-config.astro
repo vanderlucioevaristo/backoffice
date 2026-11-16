@@ -2,7 +2,7 @@
 import Layout from '../layouts/Layout.astro';
 import { db } from '../lib/auth';
 import { DIAS_SEMANA_LABELS } from '../lib/empresa-service';
-import { str } from '../lib/validate';
+import { onlyDigits, str } from '../lib/validate';
 
 const u = Astro.locals.user!;
 const validColor = (c: string, def: string) => (/^#[0-9a-fA-F]{6}$/.test(c) ? c : def);
@@ -23,7 +23,8 @@ let emp = await db()
             COALESCE(agenda_fim, '18:00') AS agenda_fim,
             COALESCE(agenda_intervalo_min, 30) AS agenda_intervalo_min,
             COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
-            agenda_datas_fechadas
+            agenda_datas_fechadas,
+            COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem
        FROM empresas WHERE id = ?`,
   )
   .bind(u.empresaId)
@@ -62,6 +63,7 @@ if (Astro.request.method === 'POST') {
     .filter((v) => /^[0-6]$/.test(v));
   const agendaDiasSemana = diasMarcados.join(',');
   const agendaDatasFechadas = str(f, 'agenda_datas_fechadas', 1000);
+  const cepOrigem = onlyDigits(str(f, 'cep_origem', 12)) || '01001000';
 
   if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
     erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
@@ -74,7 +76,7 @@ if (Astro.request.method === 'POST') {
                 rodape_horario = ?, rodape_endereco = ?, rodape_suporte = ?, rodape_instagram = ?,
                 rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
                 agenda_ativa = ?, agenda_menu_texto = ?, agenda_inicio = ?, agenda_fim = ?, agenda_intervalo_min = ?,
-                agenda_dias_semana = ?, agenda_datas_fechadas = ?
+                agenda_dias_semana = ?, agenda_datas_fechadas = ?, cep_origem = ?
           WHERE id = ?`,
       )
       .bind(
@@ -103,6 +105,7 @@ if (Astro.request.method === 'POST') {
         agendaIntervaloMin,
         agendaDiasSemana,
         agendaDatasFechadas || null,
+        cepOrigem,
         u.empresaId,
       )
       .run();
@@ -133,6 +136,7 @@ if (Astro.request.method === 'POST') {
       agenda_intervalo_min: agendaIntervaloMin,
       agenda_dias_semana: agendaDiasSemana,
       agenda_datas_fechadas: agendaDatasFechadas,
+      cep_origem: cepOrigem,
     };
     ok = true;
   }
@@ -329,7 +333,7 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           >{emp.rodape_suporte ?? ''}</textarea>
         </div>
 
-        <div class="c12">
+        <div class="c8">
           <label>Endereço físico / Localização da loja</label>
           <textarea
             name="rodape_endereco"
@@ -337,6 +341,18 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             rows="2"
             placeholder="Ex: Av. Paulista, 1000 - Bela Vista, São Paulo/SP - CEP 01310-100"
           >{emp.rodape_endereco ?? ''}</textarea>
+        </div>
+        <div class="c4">
+          <label>🚚 CEP de origem para cálculo de frete (Correios)</label>
+          <input
+            name="cep_origem"
+            value={emp.cep_origem || '01001000'}
+            maxlength="9"
+            placeholder="01001-000"
+          />
+          <small class="muted" style="display:block;margin-top:4px">
+            Usado como CEP remetente no cálculo de PAC e SEDEX nos pedidos.
+          </small>
         </div>
 
         <div class="c3">

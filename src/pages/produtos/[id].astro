@@ -31,6 +31,11 @@ let p: Record<string, any> = {
   preco_venda: 0,
   estoque_atual: 0,
   estoque_minimo: 0,
+  peso_kg: 0.3,
+  comprimento_cm: 16,
+  largura_cm: 11,
+  altura_cm: 5,
+  formato_correios: 1,
   ativo: 1,
 };
 let vinculos: FornVinculo[] = [];
@@ -79,6 +84,13 @@ if (Astro.request.method === 'POST') {
     preco_venda: parseNum(f.get('preco_venda'), 0),
     estoque_atual: parseNum(f.get('estoque_atual'), 0),
     estoque_minimo: parseNum(f.get('estoque_minimo'), 0),
+    peso_kg: Math.max(0.01, parseNum(f.get('peso_kg'), 0.3)),
+    comprimento_cm: Math.max(15, Math.min(100, parseNum(f.get('comprimento_cm'), 16))),
+    largura_cm: Math.max(10, Math.min(100, parseNum(f.get('largura_cm'), 11))),
+    altura_cm: Math.max(2, Math.min(100, parseNum(f.get('altura_cm'), 5))),
+    formato_correios: [1, 2, 3].includes(Number(f.get('formato_correios')))
+      ? Number(f.get('formato_correios'))
+      : 1,
     localizacao: str(f, 'localizacao', 100),
     observacoes: str(f, 'observacoes', 2000),
     foto,
@@ -146,7 +158,9 @@ if (Astro.request.method === 'POST') {
   if (!erro) {
     const cols = [
       'codigo','codigo_barras','nome','descricao','categoria','marca','unidade','ncm',
-      'preco_custo','preco_venda','estoque_atual','estoque_minimo','localizacao','observacoes','foto','ativo',
+      'preco_custo','preco_venda','estoque_atual','estoque_minimo',
+      'peso_kg','comprimento_cm','largura_cm','altura_cm','formato_correios',
+      'localizacao','observacoes','foto','ativo',
     ];
     const vals = cols.map((c) => (typeof p[c] === 'string' && p[c] === '' ? null : p[c]));
 
@@ -311,6 +325,79 @@ const rowsToRender: FornVinculo[] =
     </div>
 
     <div class="card">
+      <h2>📦 Peso e Dimensões para Frete (Correios — PAC / SEDEX)</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Estes dados são utilizados para calcular automaticamente o valor e o prazo do frete via Correios quando o cliente confirmar o pedido. Limites mínimos dos Correios: Comprimento 15 cm, Largura 10 cm, Altura 2 cm.
+      </p>
+      <div class="grid">
+        <div class="c3">
+          <label>Formato da encomenda</label>
+          <select name="formato_correios">
+            <option value="1" selected={(p.formato_correios ?? 1) === 1}>1 — Caixa / Pacote</option>
+            <option value="2" selected={p.formato_correios === 2}>2 — Rolo / Cilindro</option>
+            <option value="3" selected={p.formato_correios === 3}>3 — Envelope</option>
+          </select>
+        </div>
+        <div class="c2">
+          <label>Peso bruto (kg) *</label>
+          <input
+            name="peso_kg"
+            id="inp-peso-kg"
+            type="number"
+            step="0.001"
+            min="0.01"
+            value={p.peso_kg ?? 0.3}
+            required
+          />
+        </div>
+        <div class="c2">
+          <label>Comprimento (cm) *</label>
+          <input
+            name="comprimento_cm"
+            id="inp-comp-cm"
+            type="number"
+            step="0.1"
+            min="15"
+            max="100"
+            value={p.comprimento_cm ?? 16}
+            required
+          />
+        </div>
+        <div class="c2">
+          <label>Largura (cm) *</label>
+          <input
+            name="largura_cm"
+            id="inp-larg-cm"
+            type="number"
+            step="0.1"
+            min="10"
+            max="100"
+            value={p.largura_cm ?? 11}
+            required
+          />
+        </div>
+        <div class="c3">
+          <label>Altura (cm) *</label>
+          <input
+            name="altura_cm"
+            id="inp-alt-cm"
+            type="number"
+            step="0.1"
+            min="2"
+            max="100"
+            value={p.altura_cm ?? 5}
+            required
+          />
+        </div>
+        <div class="c12">
+          <small class="muted" id="resumo-cubagem">
+            Peso cúbico Correios (C × L × A ÷ 6000): calculando...
+          </small>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="row" style="margin-bottom:8px">
         <h2 style="margin:0">Fornecedores deste produto</h2>
         <span class="spacer"></span>
@@ -411,6 +498,33 @@ const rowsToRender: FornVinculo[] =
   venda.addEventListener('input', syncFromPrecos);
   margem.addEventListener('input', syncFromMargem);
   syncFromPrecos();
+
+  // Cálculo em tempo real do peso cúbico e peso tarifado pelos Correios
+  const inpPeso = document.getElementById('inp-peso-kg');
+  const inpComp = document.getElementById('inp-comp-cm');
+  const inpLarg = document.getElementById('inp-larg-cm');
+  const inpAlt = document.getElementById('inp-alt-cm');
+  const resumoCub = document.getElementById('resumo-cubagem');
+
+  function syncCubagem() {
+    if (!inpPeso || !inpComp || !inpLarg || !inpAlt || !resumoCub) return;
+    const peso = Math.max(0.05, parseFloat(inpPeso.value) || 0.3);
+    const c = Math.max(15, parseFloat(inpComp.value) || 16);
+    const l = Math.max(10, parseFloat(inpLarg.value) || 11);
+    const a = Math.max(2, parseFloat(inpAlt.value) || 5);
+    const cubico = (c * l * a) / 6000;
+    const tarifado = Math.max(peso, cubico);
+    resumoCub.textContent =
+      'Peso físico: ' +
+      peso.toFixed(3) +
+      ' kg · Peso cúbico Correios (C×L×A ÷ 6000): ' +
+      cubico.toFixed(3) +
+      ' kg · Peso tarifado unitário: ' +
+      tarifado.toFixed(3) +
+      ' kg';
+  }
+  [inpPeso, inpComp, inpLarg, inpAlt].forEach((el) => el && el.addEventListener('input', syncCubagem));
+  syncCubagem();
 
   // Upload/redimensionamento e pré-visualização da foto do produto
   const inpFileFoto = document.getElementById('inp-file-foto');

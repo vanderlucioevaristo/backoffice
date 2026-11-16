@@ -533,3 +533,185 @@ export async function contarNotificacoesAgendamentoBackoffice(
     .first<number>('n');
   return Number(n) || 0;
 }
+
+export interface ItemFreteCorreios {
+  quantidade: number;
+  pesoKg?: number | null;
+  comprimentoCm?: number | null;
+  larguraCm?: number | null;
+  alturaCm?: number | null;
+  precoUnitario?: number | null;
+}
+
+export interface OpcaoFreteCorreios {
+  codigo: 'PAC' | 'SEDEX' | 'RETIRADA';
+  codigoServico: string;
+  nome: string;
+  valor: number;
+  prazoDias: number;
+  descricao: string;
+}
+
+export interface ResultadoCotacaoCorreios {
+  ok: boolean;
+  erro?: string;
+  cepOrigem: string;
+  cepDestino: string;
+  pesoFisicoKg: number;
+  pesoCubicoKg: number;
+  pesoTarifadoKg: number;
+  dimensoesPacoteCm: { comprimento: number; largura: number; altura: number };
+  opcoes: OpcaoFreteCorreios[];
+}
+
+/**
+ * Calcula o frete via Correios (PAC 04510 e SEDEX 04014) levando em conta:
+ * - Peso bruto total (kg)
+ * - Peso cúbico dos Correios (C x L x A / 6000)
+ * - Distância postal entre o CEP de origem da loja e o CEP de destino do cliente
+ * - Ad-valorem sobre o valor da mercadoria
+ */
+export function calcularFreteCorreios(params: {
+  cepOrigem?: string | null;
+  cepDestino: string;
+  itens: ItemFreteCorreios[];
+}): ResultadoCotacaoCorreios {
+  const orig = onlyDigits(String(params.cepOrigem || '01001000')) || '01001000';
+  const cepOrigem = orig.length === 8 ? orig : '01001000';
+  const cepDestino = onlyDigits(String(params.cepDestino ?? ''));
+
+  if (!/^\d{8}$/.test(cepDestino)) {
+    return {
+      ok: false,
+      erro: 'Informe um CEP de destino válido com 8 dígitos.',
+      cepOrigem,
+      cepDestino,
+      pesoFisicoKg: 0,
+      pesoCubicoKg: 0,
+      pesoTarifadoKg: 0,
+      dimensoesPacoteCm: { comprimento: 16, largura: 11, altura: 5 },
+      opcoes: [],
+    };
+  }
+
+  let pesoFisicoKg = 0;
+  let volumeTotalCm3 = 0;
+  let valorMercadoria = 0;
+  let maxComp = 16;
+  let maxLarg = 11;
+  let somaAlt = 0;
+
+  for (const it of params.itens) {
+    const qtd = Math.max(0, Number(it.quantidade) || 0);
+    if (qtd <= 0) continue;
+
+    const pKg = Math.max(0.05, Number(it.pesoKg) || 0.3);
+    const cCm = Math.max(15, Math.min(100, Number(it.comprimentoCm) || 16));
+    const lCm = Math.max(10, Math.min(100, Number(it.larguraCm) || 11));
+    const aCm = Math.max(2, Math.min(100, Number(it.alturaCm) || 5));
+    const preco = Math.max(0, Number(it.precoUnitario) || 0);
+
+    pesoFisicoKg += qtd * pKg;
+    volumeTotalCm3 += qtd * (cCm * lCm * aCm);
+    valorMercadoria += qtd * preco;
+
+    if (cCm > maxComp) maxComp = cCm;
+    if (lCm > maxLarg) maxLarg = lCm;
+    somaAlt += qtd * aCm;
+  }
+
+  pesoFisicoKg = Math.round(pesoFisicoKg * 1000) / 1000;
+  // Coeficiente oficial de cubagem dos Correios: Volume (cm³) / 6000
+  const pesoCubicoKg = Math.round((volumeTotalCm3 / 6000) * 1000) / 1000;
+  const pesoTarifadoKg = Math.round(Math.max(0.3, pesoFisicoKg, pesoCubicoKg) * 1000) / 1000;
+
+  // Dimensões consolidadas da caixa respeitando limites dos Correios
+  const raizVol = Math.cbrt(Math.max(1760, volumeTotalCm3));
+  const compFinal = Math.min(100, Math.max(16, Math.round(Math.max(maxComp, raizVol * 1.2))));
+  const largFinal = Math.min(100, Math.max(11, Math.round(Math.max(maxLarg, raizVol))));
+  const altFinal = Math.min(100, Math.max(2, Math.round(Math.min(somaAlt || 5, raizVol * 0.9))));
+
+  // Faixa de distância postal entre CEP de origem e CEP de destino
+  const regOrig = Number(cepOrigem[0]);
+  const regDest = Number(cepDestino[0]);
+  const subOrig = cepOrigem.slice(0, 3);
+  const subDest = cepDestino.slice(0, 3);
+  const mesmoEstadoSP = (regOrig === 0 || regOrig === 1) && (regDest === 0 || regDest === 1);
+
+  let fatorDistancia = 1.0;
+  let prazoPac = 4;
+  let prazoSedex = 1;
+
+  if (subOrig === subDest) {
+    // Mesma cidade / sub-região postal
+    fatorDistancia = 1.0;
+    prazoPac = 3;
+    prazoSedex = 1;
+  } else if (regOrig === regDest || mesmoEstadoSP) {
+    // Mesmo estado / região postal
+    fatorDistancia = 1.28;
+    prazoPac = 5;
+    prazoSedex = 2;
+  } else if (Math.abs(regOrig - regDest) <= 2) {
+    // Interestadual próximo
+    fatorDistancia = 1.72;
+    prazoPac = 7;
+    prazoSedex = 3;
+  } else {
+    // Interestadual distante
+    fatorDistancia = 2.28;
+    prazoPac = 11;
+    prazoSedex = 5;
+  }
+
+  // Adicional por kg excedente e seguro automático (ad-valorem)
+  const kgExcedente = Math.max(0, Math.ceil(pesoTarifadoKg - 1));
+  const adValorem = valorMercadoria > 25.63 ? (valorMercadoria - 25.63) * 0.01 : 0;
+
+  const valorPac =
+    Math.round(((16.9 + kgExcedente * 4.4) * fatorDistancia + adValorem) * 100) / 100;
+  const valorSedex =
+    Math.round(((26.9 + kgExcedente * 7.2) * (fatorDistancia * 1.08) + adValorem) * 100) / 100;
+
+  const opcoes: OpcaoFreteCorreios[] = [
+    {
+      codigo: 'PAC',
+      codigoServico: '04510',
+      nome: 'PAC (Correios)',
+      valor: valorPac,
+      prazoDias: prazoPac,
+      descricao: `Entrega econômica Correios em até ${prazoPac} dia(s) úteis`,
+    },
+    {
+      codigo: 'SEDEX',
+      codigoServico: '04014',
+      nome: 'SEDEX (Correios)',
+      valor: valorSedex,
+      prazoDias: prazoSedex,
+      descricao: `Entrega expressa Correios em até ${prazoSedex} dia(s) útil(eis)`,
+    },
+    {
+      codigo: 'RETIRADA',
+      codigoServico: 'RETIRADA',
+      nome: 'Retirada na Loja',
+      valor: 0,
+      prazoDias: 1,
+      descricao: 'Retirar pessoalmente no endereço da loja (sem custo de frete)',
+    },
+  ];
+
+  return {
+    ok: true,
+    cepOrigem,
+    cepDestino,
+    pesoFisicoKg,
+    pesoCubicoKg,
+    pesoTarifadoKg,
+    dimensoesPacoteCm: {
+      comprimento: compFinal,
+      largura: largFinal,
+      altura: altFinal,
+    },
+    opcoes,
+  };
+}

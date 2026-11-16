@@ -26,6 +26,7 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   const isLojaPublic =
     path.startsWith('/loja/') ||
     path === '/api/loja-chat' ||
+    path === '/api/calcular-frete' ||
     path === '/api/consulta-cep' ||
     path === '/api/consulta-doc';
 

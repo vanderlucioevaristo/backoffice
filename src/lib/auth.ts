@@ -317,6 +317,16 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN agenda_intervalo_min INTEGER NOT NULL DEFAULT 30",
       "ALTER TABLE empresas ADD COLUMN agenda_dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5'",
       "ALTER TABLE empresas ADD COLUMN agenda_datas_fechadas TEXT",
+      "ALTER TABLE empresas ADD COLUMN cep_origem TEXT DEFAULT '01001000'",
+      "ALTER TABLE produtos ADD COLUMN peso_kg REAL NOT NULL DEFAULT 0.3",
+      "ALTER TABLE produtos ADD COLUMN comprimento_cm REAL NOT NULL DEFAULT 16",
+      "ALTER TABLE produtos ADD COLUMN altura_cm REAL NOT NULL DEFAULT 5",
+      "ALTER TABLE produtos ADD COLUMN largura_cm REAL NOT NULL DEFAULT 11",
+      "ALTER TABLE produtos ADD COLUMN formato_correios INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE loja_pedidos ADD COLUMN valor_frete REAL NOT NULL DEFAULT 0",
+      "ALTER TABLE loja_pedidos ADD COLUMN frete_modalidade TEXT",
+      "ALTER TABLE loja_pedidos ADD COLUMN frete_prazo_dias INTEGER",
+      "ALTER TABLE loja_pedidos ADD COLUMN cep_entrega TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -447,6 +457,7 @@ export type LojaEmpresa = {
   agenda_intervalo_min: number;
   agenda_dias_semana: string;
   agenda_datas_fechadas: string | null;
+  cep_origem: string | null;
 };
 
 export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null> {
@@ -464,7 +475,8 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               COALESCE(agenda_fim, '18:00') AS agenda_fim,
               COALESCE(agenda_intervalo_min, 30) AS agenda_intervalo_min,
               COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
-              agenda_datas_fechadas
+              agenda_datas_fechadas,
+              COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem
          FROM empresas
         WHERE codigo = ? AND ativa = 1`,
     )

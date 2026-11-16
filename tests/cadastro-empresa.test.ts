@@ -15,6 +15,7 @@ import {
   criarAgendamentoLoja,
   listarVisaoAgendaCliente,
   contarNotificacoesAgendamentoBackoffice,
+  calcularFreteCorreios,
   IDLE_TIMEOUT_MS,
 } from '../src/lib/empresa-service.ts';
 
@@ -385,5 +386,54 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     });
     assert.equal(agFeriado.ok, false);
     assert.match(agFeriado.erro || '', /não há prestação de serviços/i);
+  });
+
+  test('calcula frete via Correios (PAC e SEDEX) considerando peso físico, dimensões cúbicas e distância por CEP', async () => {
+    // Mesmo estado (SP -> SP) com 2 unidades de produto de 1.2kg e caixa 30x20x15cm
+    const cotacaoLocal = calcularFreteCorreios({
+      cepOrigem: '01001-000',
+      cepDestino: '13010-000',
+      itens: [
+        {
+          quantidade: 2,
+          pesoKg: 1.2,
+          comprimentoCm: 30,
+          larguraCm: 20,
+          alturaCm: 15,
+          precoUnitario: 120,
+        },
+      ],
+    });
+
+    assert.equal(cotacaoLocal.ok, true);
+    assert.equal(cotacaoLocal.pesoFisicoKg, 2.4);
+    assert.ok(cotacaoLocal.pesoCubicoKg > 0);
+    assert.ok(cotacaoLocal.pesoTarifadoKg >= 2.4);
+    assert.ok(cotacaoLocal.opcoes.length >= 2);
+
+    const pacLocal = cotacaoLocal.opcoes.find((o) => o.codigo === 'PAC');
+    const sedexLocal = cotacaoLocal.opcoes.find((o) => o.codigo === 'SEDEX');
+    assert.ok(pacLocal && sedexLocal);
+    assert.ok(sedexLocal.valor > pacLocal.valor, 'SEDEX deve ter valor superior ao PAC');
+    assert.ok(sedexLocal.prazoDias <= pacLocal.prazoDias, 'SEDEX deve ter prazo menor ou igual ao PAC');
+
+    // Interestadual distante (SP -> AM) deve custar mais que envio dentro do mesmo estado
+    const cotacaoDistante = calcularFreteCorreios({
+      cepOrigem: '01001-000',
+      cepDestino: '69005-000',
+      itens: [
+        {
+          quantidade: 2,
+          pesoKg: 1.2,
+          comprimentoCm: 30,
+          larguraCm: 20,
+          alturaCm: 15,
+          precoUnitario: 120,
+        },
+      ],
+    });
+    assert.equal(cotacaoDistante.ok, true);
+    const pacDistante = cotacaoDistante.opcoes.find((o) => o.codigo === 'PAC')!;
+    assert.ok(pacDistante.valor > pacLocal.valor, 'Frete interestadual distante deve ser maior que o estadual');
   });
 });

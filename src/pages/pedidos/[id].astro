@@ -291,15 +291,27 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
       </table>
     </div>
 
-    <div class="row" style="justify-content:flex-end;margin-top:14px;gap:24px">
+    <div class="row" style="justify-content:flex-end;margin-top:14px;gap:24px;flex-wrap:wrap">
+      <div>
+        <span class="muted">Subtotal dos produtos:</span> R$ {formatMoney(somaItens)}
+      </div>
+      {(pedido.frete_modalidade || Number(pedido.valor_frete) > 0) && (
+        <div>
+          <span class="muted">
+            🚚 Frete ({pedido.frete_modalidade || 'Correios'}
+            {pedido.cep_entrega ? ` · CEP ${pedido.cep_entrega}` : ''}
+            {pedido.frete_prazo_dias ? ` · ${pedido.frete_prazo_dias}d úteis` : ''}):
+          </span>{' '}
+          <strong>+R$ {formatMoney(Number(pedido.valor_frete || 0))}</strong>
+        </div>
+      )}
       {Number(pedido.valor_desconto) > 0 && (
         <div>
-          <span class="muted">Subtotal:</span> {formatMoney(somaItens)} ·
-          <span class="muted">Desconto:</span> −{formatMoney(pedido.valor_desconto)}
+          <span class="muted">Desconto:</span> −R$ {formatMoney(pedido.valor_desconto)}
         </div>
       )}
       <div style="font-size:18px">
-        <span class="muted">Total do Pedido:</span> <strong>{formatMoney(pedido.valor_total)}</strong>
+        <span class="muted">Total do Pedido:</span> <strong>R$ {formatMoney(pedido.valor_total)}</strong>
       </div>
     </div>
   </div>

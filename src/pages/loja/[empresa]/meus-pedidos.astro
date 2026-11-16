@@ -25,9 +25,25 @@ Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
 });
 
 const { results: pedidos } = await db()
-  .prepare('SELECT id, valor_total, status, observacoes, criado_em FROM loja_pedidos WHERE empresa_id = ? AND parceiro_id = ? ORDER BY id DESC')
+  .prepare(
+    `SELECT id, valor_total, COALESCE(valor_frete, 0) AS valor_frete,
+            frete_modalidade, frete_prazo_dias, cep_entrega, status, observacoes, criado_em
+       FROM loja_pedidos
+      WHERE empresa_id = ? AND parceiro_id = ?
+      ORDER BY id DESC`,
+  )
   .bind(empresa.id, cliente.id)
-  .all<{ id: number; valor_total: number; status: string; observacoes: string | null; criado_em: string }>();
+  .all<{
+    id: number;
+    valor_total: number;
+    valor_frete: number;
+    frete_modalidade: string | null;
+    frete_prazo_dias: number | null;
+    cep_entrega: string | null;
+    status: string;
+    observacoes: string | null;
+    criado_em: string;
+  }>();
 
 const { results: todosItens } = await db()
   .prepare(
@@ -85,8 +101,14 @@ const baseUrl = `/loja/${empCodigo}`;
             <span class={st.cls} style={ped.status === 'entregue' ? 'background:#dcfce7;color:#166534' : ''}>
               {st.txt}
             </span>
+            {ped.frete_modalidade && (
+              <span class="muted" style="font-size:12.5px">
+                🚚 {ped.frete_modalidade}: <strong>{ped.valor_frete > 0 ? `R$ ${formatMoney(ped.valor_frete)}` : 'Grátis'}</strong>
+                {ped.frete_prazo_dias ? ` (até ${ped.frete_prazo_dias}d úteis)` : ''}
+              </span>
+            )}
             <span class="spacer"></span>
-            <strong style="font-size:17px;color:var(--pr)">{formatMoney(ped.valor_total)}</strong>
+            <strong style="font-size:17px;color:var(--pr)">R$ {formatMoney(ped.valor_total)}</strong>
           </div>
           <div class="tbl-wrap">
             <table>

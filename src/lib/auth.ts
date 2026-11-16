@@ -343,6 +343,24 @@ export async function ensureSchema(): Promise<void> {
       await database.prepare(alt).run().catch(() => {});
     }
 
+    // Garante que exista a empresa e o administrador inicial caso o banco tenha acabado de ser zerado
+    const qtdEmp = await database.prepare('SELECT COUNT(*) AS n FROM empresas').first<number>('n');
+    if (!qtdEmp || Number(qtdEmp) === 0) {
+      const empInit = await database
+        .prepare(
+          "INSERT INTO empresas (codigo, razao_social, nome_fantasia, cnpj, ativa) VALUES ('vanderltda', 'VANDER EVARISTO LTDA', 'VANDER EVARISTO LTDA', '65491970000182', 1) RETURNING id",
+        )
+        .first<{ id: number }>();
+      if (empInit?.id) {
+        await database
+          .prepare(
+            "INSERT INTO usuarios (empresa_id, login, nome, email, perfil, ativo, senha_hash) VALUES (?, 'vander', 'VANDER LUCIO EVARISTO', 'vanderlucioevaristo@gmail.com', 'admin', 1, 'pbkdf2$100000$fvNXIPtcPWqOSyF0qwDoMA==$MboMiwiCcmSXv2rec3y6DJFPep6j5qqsPKu9pTbY7mw=')",
+          )
+          .bind(empInit.id)
+          .run();
+      }
+    }
+
     schemaReady = true;
   } catch (e) {
     console.error('Erro ao garantir schema D1:', e);

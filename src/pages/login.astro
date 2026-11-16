@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { db, verifyPassword, createSession, DUMMY_HASH, SESSION_COOKIE, signupAllowed } from '../lib/auth';
+import { db, verifyPassword, createSession, DUMMY_HASH, SESSION_COOKIE } from '../lib/auth';
 
 if (Astro.locals.user) return Astro.redirect('/');
 
@@ -45,6 +45,5 @@ if (Astro.request.method === 'POST') {
     <p><label for="senha">Senha</label><input id="senha" name="senha" type="password" required autocomplete="current-password" /></p>
     <button style="width:100%">Entrar</button>
     <p class="muted" style="text-align:center;margin:10px 0 0"><a href="/recuperar-senha">Esqueci minha senha</a></p>
-    {signupAllowed() && <p class="muted" style="text-align:center;margin:6px 0 0">Nova empresa? <a href="/cadastro-empresa">Cadastre-se</a></p>}
   </form>
 </Layout>

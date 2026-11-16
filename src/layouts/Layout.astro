@@ -112,7 +112,12 @@ if (!bare && user) {
             <a href="/notas-entrada" class={active === 'notas' ? 'on' : ''}>Entrada de NF</a>
             <a href="/estoque" class={active === 'estoque' ? 'on' : ''}>Estoque</a>
             <a href="/loja-config" class={active === 'loja-config' ? 'on' : ''}>Minha Loja</a>
-            {user?.perfil === 'admin' && <a href="/usuarios" class={active === 'usuarios' ? 'on' : ''}>Usuários</a>}
+            {user?.perfil === 'admin' && (
+              <>
+                <a href="/empresas" class={active === 'empresas' ? 'on' : ''}>Empresas</a>
+                <a href="/usuarios" class={active === 'usuarios' ? 'on' : ''}>Usuários</a>
+              </>
+            )}
           </nav>
           <div class="who">
             <a

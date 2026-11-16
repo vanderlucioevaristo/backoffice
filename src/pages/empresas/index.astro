@@ -1,0 +1,217 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { registrarEmpresaComUsuario } from '../../lib/empresa-service';
+import { formatDoc, str } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+if (u.perfil !== 'admin') return Astro.redirect('/?erro=permissao');
+
+let erro = '';
+let ok = '';
+let v: Record<string, string> = {};
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? 'criar');
+
+  if (acao === 'alternar_status') {
+    const empId = Number(f.get('id')) || 0;
+    if (empId === u.empresaId) {
+      erro = 'Você não pode desativar a própria empresa em que está logado no momento.';
+    } else if (empId > 0) {
+      await db()
+        .prepare('UPDATE empresas SET ativa = CASE WHEN ativa = 1 THEN 0 ELSE 1 END WHERE id = ?')
+        .bind(empId)
+        .run();
+      ok = 'Status da empresa atualizado!';
+    }
+  } else {
+    v = {
+      codigo: str(f, 'codigo', 30).toLowerCase(),
+      razao: str(f, 'razao'),
+      fantasia: str(f, 'fantasia'),
+      cnpj: str(f, 'cnpj', 20),
+      nome: str(f, 'nome'),
+      email: str(f, 'email'),
+      login: str(f, 'login', 40).toLowerCase(),
+    };
+    const senha = String(f.get('senha') ?? '');
+
+    const res = await registrarEmpresaComUsuario(db(), {
+      codigo: v.codigo,
+      razao: v.razao,
+      fantasia: v.fantasia,
+      cnpj: v.cnpj,
+      nome: v.nome,
+      email: v.email,
+      login: v.login,
+      senha,
+    });
+
+    if (!res.ok) {
+      erro = res.erro ?? 'Erro ao cadastrar empresa.';
+    } else {
+      ok = `Empresa "${v.razao}" (código: ${v.codigo}) e usuário administrador "${v.login}" criados com sucesso!`;
+      v = {};
+    }
+  }
+}
+
+const { results: empresas } = await db()
+  .prepare(
+    `SELECT e.id, e.codigo, e.razao_social, e.nome_fantasia, e.cnpj, e.ativa, e.criado_em,
+            GROUP_CONCAT(u.login, ', ') AS usuarios_login,
+            COUNT(u.id) AS total_usuarios
+       FROM empresas e
+       LEFT JOIN usuarios u ON u.empresa_id = e.id
+      GROUP BY e.id
+      ORDER BY e.id ASC`,
+  )
+  .all<{
+    id: number;
+    codigo: string;
+    razao_social: string;
+    nome_fantasia: string | null;
+    cnpj: string | null;
+    ativa: number;
+    criado_em: string;
+    usuarios_login: string | null;
+    total_usuarios: number;
+  }>();
+---
+<Layout title="Cadastro de Empresas" active="empresas">
+  <div class="row">
+    <h1>🏢 Cadastro e Gestão de Empresas</h1>
+    <span class="spacer"></span>
+    <span class="tag ok">Acesso Exclusivo Administrador</span>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">{ok}</div>}
+
+  <div class="card">
+    <h2>Cadastrar Nova Empresa + Administrador Inicial</h2>
+    <p class="muted" style="margin-top:0">
+      Crie uma nova empresa isolada no sistema com seu respectivo usuário administrador.
+    </p>
+    <form method="post" class="grid">
+      <input type="hidden" name="_acao" value="criar" />
+
+      <div class="c4">
+        <label>Código da empresa * (usado no login e na URL da loja)</label>
+        <input
+          name="codigo"
+          value={v.codigo ?? ''}
+          required
+          placeholder="Ex: minhaloja"
+          pattern="[a-z0-9][a-z0-9-]{2,29}"
+        />
+      </div>
+      <div class="c4">
+        <label>CNPJ</label>
+        <input name="cnpj" value={v.cnpj ?? ''} placeholder="00.000.000/0000-00" />
+      </div>
+      <div class="c4">
+        <label>Nome Fantasia</label>
+        <input name="fantasia" value={v.fantasia ?? ''} placeholder="Nome comercial da empresa" />
+      </div>
+
+      <div class="c12">
+        <label>Razão Social *</label>
+        <input name="razao" value={v.razao ?? ''} required placeholder="Razão Social completa" />
+      </div>
+
+      <div class="c12">
+        <h3 style="margin:6px 0 0;font-size:15px">Dados do Usuário Administrador da Nova Empresa</h3>
+      </div>
+
+      <div class="c4">
+        <label>Nome completo do Administrador *</label>
+        <input name="nome" value={v.nome ?? ''} required />
+      </div>
+      <div class="c3">
+        <label>Login do Administrador *</label>
+        <input name="login" value={v.login ?? ''} required autocomplete="off" />
+      </div>
+      <div class="c3">
+        <label>E-mail</label>
+        <input name="email" type="email" value={v.email ?? ''} />
+      </div>
+      <div class="c2">
+        <label>Senha inicial * (mín. 8)</label>
+        <input name="senha" type="password" required minlength="8" autocomplete="new-password" />
+      </div>
+
+      <div class="c12 row">
+        <button>+ Criar Empresa e Administrador</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Empresas Cadastradas na Base ({empresas.length})</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Código (`empresa`)</th>
+            <th>Razão Social / Nome Fantasia</th>
+            <th>CNPJ</th>
+            <th>Usuários</th>
+            <th>Loja Virtual</th>
+            <th>Status</th>
+            <th class="num">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {empresas.map((e) => (
+            <tr>
+              <td>#{e.id}</td>
+              <td>
+                <strong><code>{e.codigo}</code></strong>
+                {e.id === u.empresaId && (
+                  <span class="tag ok" style="margin-left:6px">Atual</span>
+                )}
+              </td>
+              <td>
+                <strong>{e.razao_social}</strong>
+                {e.nome_fantasia && e.nome_fantasia !== e.razao_social && (
+                  <div class="muted" style="font-size:12px">{e.nome_fantasia}</div>
+                )}
+              </td>
+              <td>{e.cnpj ? formatDoc(e.cnpj) : '—'}</td>
+              <td>
+                <span class="muted" style="font-size:12.5px">{e.usuarios_login || '—'}</span>
+              </td>
+              <td>
+                <a href={`/loja/${e.codigo}`} target="_blank">
+                  /loja/{e.codigo} ↗
+                </a>
+              </td>
+              <td>
+                {e.ativa === 1 ? (
+                  <span class="tag ok">Ativa</span>
+                ) : (
+                  <span class="tag off">Inativa</span>
+                )}
+              </td>
+              <td class="num">
+                {e.id !== u.empresaId && (
+                  <form method="post" style="display:inline">
+                    <input type="hidden" name="_acao" value="alternar_status" />
+                    <input type="hidden" name="id" value={e.id} />
+                    <button class="sm sec">
+                      {e.ativa === 1 ? 'Desativar' : 'Ativar'}
+                    </button>
+                  </form>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</Layout>

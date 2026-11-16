@@ -3,7 +3,6 @@ import { ensureSchema, getSessionUser, SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '
 
 const PUBLIC = [
   '/login',
-  '/cadastro-empresa',
   '/recuperar-senha',
   '/manifest.webmanifest',
   '/sw.js',
@@ -45,7 +44,12 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     }
     return ctx.redirect('/login');
   }
-  if (path.startsWith('/usuarios') && user?.perfil !== 'admin') {
+  if (
+    (path.startsWith('/usuarios') ||
+      path.startsWith('/empresas') ||
+      path === '/cadastro-empresa') &&
+    user?.perfil !== 'admin'
+  ) {
     return ctx.redirect('/?erro=permissao');
   }
   const res = await next();

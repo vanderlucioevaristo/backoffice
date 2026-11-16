@@ -54,6 +54,13 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · {empresa.nome}</title>
+    <link rel="manifest" href={`/loja/${empresa.codigo}/manifest.webmanifest`} />
+    <meta name="theme-color" content={headerBg} />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content={empresa.nome} />
+    <link rel="icon" href={empresa.loja_logo || `/loja/${empresa.codigo}/icon.svg`} />
+    <link rel="apple-touch-icon" href={empresa.loja_logo || `/loja/${empresa.codigo}/icon.svg`} />
     <style is:global define:vars={{
       pr: primaryColor,
       topBg: headerBg,
@@ -919,6 +926,15 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
               <form method="post" action={`${baseUrl}/sair`} id="loja-logout-form" style="margin:0">
                 <button class="ml-logout-btn">Sair</button>
               </form>
+              <button
+                type="button"
+                id="btn-pwa-loja"
+                class="ml-logout-btn"
+                style="display:none;background:rgba(255,255,255,0.22);font-weight:700"
+                title={`Instalar aplicativo ${empresa.nome}`}
+              >
+                📲 Instalar App
+              </button>
             </div>
           )}
         </div>
@@ -1221,6 +1237,48 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
           window.addEventListener(ev, resetIdleTimer, { passive: true });
         });
         resetIdleTimer();
+      })();
+
+      // Registro do Service Worker PWA e botão de instalação do App da Loja
+      (function () {
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
+          });
+        }
+        const isStandalone =
+          window.matchMedia('(display-mode: standalone)').matches ||
+          window.navigator.standalone === true;
+        if (isStandalone) return;
+
+        let deferredPrompt = null;
+        const btnPwaLoja = document.getElementById('btn-pwa-loja');
+        const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+
+        if (isIos && btnPwaLoja) {
+          btnPwaLoja.style.display = 'inline-flex';
+        }
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+          e.preventDefault();
+          deferredPrompt = e;
+          if (btnPwaLoja) btnPwaLoja.style.display = 'inline-flex';
+        });
+
+        if (btnPwaLoja) {
+          btnPwaLoja.addEventListener('click', async () => {
+            if (deferredPrompt) {
+              deferredPrompt.prompt();
+              await deferredPrompt.userChoice;
+              deferredPrompt = null;
+              btnPwaLoja.style.display = 'none';
+            } else if (isIos) {
+              alert(
+                'Para instalar o aplicativo no iPhone/iPad:\n1. Toque no ícone de Compartilhar do Safari (quadrado com seta para cima)\n2. Role e toque em "Adicionar à Tela de Início".',
+              );
+            }
+          });
+        }
       })();
     </script>
   </body>

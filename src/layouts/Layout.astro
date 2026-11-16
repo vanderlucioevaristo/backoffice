@@ -22,6 +22,13 @@ if (!bare && user) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · Backoffice</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#111827" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Backoffice" />
+    <link rel="icon" type="image/svg+xml" href="/icon-backoffice.svg" />
+    <link rel="apple-touch-icon" href="/icon-backoffice.svg" />
     <style>
       .bell-link {
         position: relative;
@@ -126,6 +133,15 @@ if (!bare && user) {
                 <span class="bell-badge" id="bell-badge">{qtdAgendamentosNovos}</span>
               )}
             </a>
+            <button
+              type="button"
+              id="btn-pwa-backoffice"
+              class="sm sec"
+              style="display:none;background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.25);padding:4px 9px;font-size:11.5px"
+              title="Instalar aplicativo Backoffice no seu dispositivo"
+            >
+              📲 Instalar App
+            </button>
             <span>{user?.empresaNome} · <a href="/conta">{user?.nome}</a></span>
             <form method="post" action="/logout" id="logout-form"><button class="link">Sair</button></form>
           </div>
@@ -155,5 +171,30 @@ if (!bare && user) {
         </script>
       </>
     )}
+    <script is:inline>
+      (function () {
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
+          });
+        }
+        let deferredPrompt = null;
+        const btnPwa = document.getElementById('btn-pwa-backoffice');
+        window.addEventListener('beforeinstallprompt', (e) => {
+          e.preventDefault();
+          deferredPrompt = e;
+          if (btnPwa) btnPwa.style.display = 'inline-flex';
+        });
+        if (btnPwa) {
+          btnPwa.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            btnPwa.style.display = 'none';
+          });
+        }
+      })();
+    </script>
   </body>
 </html>

@@ -886,3 +886,62 @@ export async function criarCheckoutNuPay(params: {
 
   return { paymentUrl: null, origem: 'NENHUM' };
 }
+
+export function gerarManifestoPwaLoja(empresa: {
+  codigo: string;
+  nome: string;
+  cor_primaria?: string | null;
+  cor_secundaria?: string | null;
+  cor_fundo?: string | null;
+  loja_logo?: string | null;
+}) {
+  const codigo = String(empresa.codigo ?? '').toLowerCase();
+  const nome = String(empresa.nome || 'Loja Virtual').trim();
+  const shortName = nome.length > 15 ? nome.slice(0, 15).trim() : nome;
+  const themeColor =
+    !empresa.cor_secundaria || empresa.cor_secundaria === '#111827'
+      ? '#ffe600'
+      : empresa.cor_secundaria;
+  const bgColor =
+    !empresa.cor_fundo || empresa.cor_fundo === '#f4f6f9' ? '#ebebeb' : empresa.cor_fundo;
+
+  const iconUrl = `/loja/${codigo}/icon.svg`;
+  const icons: Array<{ src: string; sizes: string; type: string; purpose?: string }> = [
+    {
+      src: iconUrl,
+      sizes: '192x192 512x512 any',
+      type: 'image/svg+xml',
+      purpose: 'any',
+    },
+    {
+      src: iconUrl,
+      sizes: '192x192 512x512 any',
+      type: 'image/svg+xml',
+      purpose: 'maskable',
+    },
+  ];
+
+  if (empresa.loja_logo && /^https?:\/\//i.test(empresa.loja_logo)) {
+    icons.unshift({
+      src: empresa.loja_logo,
+      sizes: '192x192 512x512',
+      type: 'image/png',
+      purpose: 'any',
+    });
+  }
+
+  return {
+    id: `/loja/${codigo}`,
+    name: nome,
+    short_name: shortName,
+    description: `Aplicativo oficial da loja ${nome}`,
+    start_url: `/loja/${codigo}`,
+    scope: `/loja/${codigo}`,
+    display: 'standalone',
+    orientation: 'portrait-primary',
+    background_color: bgColor,
+    theme_color: themeColor,
+    lang: 'pt-BR',
+    icons,
+  };
+}

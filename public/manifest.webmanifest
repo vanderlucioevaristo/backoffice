@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "Backoffice · Gestão Comercial e Loja",
+  "short_name": "Backoffice",
+  "description": "Sistema de gestão de produtos, estoque, pedidos, agenda de serviços e loja virtual.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f9",
+  "theme_color": "#111827",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/icon-backoffice.svg",
+      "sizes": "192x192 512x512 any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-backoffice.svg",
+      "sizes": "192x192 512x512 any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

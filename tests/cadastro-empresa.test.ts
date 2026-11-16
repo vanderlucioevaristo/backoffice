@@ -17,6 +17,8 @@ import {
   contarNotificacoesAgendamentoBackoffice,
   calcularFreteCorreios,
   gerarPayloadPixNubank,
+  gerarManifestoPwaLoja,
+  IDLE_TIMEOUT_SEC,
   IDLE_TIMEOUT_MS,
 } from '../src/lib/empresa-service.ts';
 
@@ -172,8 +174,8 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(segundo.erro, 'Este código de empresa já está em uso.');
   });
 
-  test('derruba a sessão do usuário se permanecer mais de 5 minutos sem atividade e renova quando ativo', async () => {
-    assert.equal(IDLE_TIMEOUT_MS, 5 * 60 * 1000);
+  test('derruba a sessão do usuário se permanecer além do tempo limite sem atividade e renova quando ativo', async () => {
+    assert.equal(IDLE_TIMEOUT_MS, IDLE_TIMEOUT_SEC * 1000);
 
     const cad = await registrarEmpresaComUsuario(ctx.d1, {
       codigo: 'emp-timeout',
@@ -186,16 +188,16 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
 
     const t0 = new Date('2026-11-12T12:00:00.000Z').getTime();
     const sessao = await criarSessaoUsuario(ctx.d1, cad.usuarioId!, cad.empresaId!, t0);
-    assert.equal(sessao.maxAge, 300);
+    assert.equal(sessao.maxAge, IDLE_TIMEOUT_SEC);
 
-    // Após 3 minutos (dentro do limite de 5 min), a sessão está ativa e é renovada por mais 5 min
-    const t3min = t0 + 3 * 60 * 1000;
-    const usuarioAtivo = await validarERenovarSessaoUsuario(ctx.d1, sessao.token, t3min);
+    // Dentro do limite de inatividade (metade do tempo), a sessão está ativa e é renovada
+    const tAtivo = t0 + Math.floor(IDLE_TIMEOUT_MS / 2);
+    const usuarioAtivo = await validarERenovarSessaoUsuario(ctx.d1, sessao.token, tAtivo);
     assert.ok(usuarioAtivo);
     assert.equal(usuarioAtivo.login, 'usrtimeout');
 
-    // Se ficar 5 minutos e 1 segundo sem fazer nada após o último acesso (t3min), a sessão cai
-    const tInativo = t3min + 5 * 60 * 1000 + 1000;
+    // Se ficar IDLE_TIMEOUT_MS + 1 segundo sem fazer nada após o último acesso, a sessão cai
+    const tInativo = tAtivo + IDLE_TIMEOUT_MS + 1000;
     const usuarioExpirado = await validarERenovarSessaoUsuario(ctx.d1, sessao.token, tInativo);
     assert.equal(usuarioExpirado, null);
 
@@ -204,7 +206,7 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(restou, 0);
   });
 
-  test('derruba a sessão do cliente na loja virtual após 5 minutos de inatividade e renova quando ativo', async () => {
+  test('derruba a sessão do cliente na loja virtual após o tempo limite de inatividade e renova quando ativo', async () => {
     const cad = await registrarEmpresaComUsuario(ctx.d1, {
       codigo: 'loja-timeout',
       razao: 'LOJA VIRTUAL TIMEOUT LTDA',
@@ -227,21 +229,21 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
 
     const t0 = new Date('2026-11-12T15:00:00.000Z').getTime();
     const sessaoLoja = await criarSessaoClienteLoja(ctx.d1, cliente!.id, cad.empresaId!, t0);
-    assert.equal(sessaoLoja.maxAge, 300);
+    assert.equal(sessaoLoja.maxAge, IDLE_TIMEOUT_SEC);
 
-    // Após 4 minutos, o cliente interage na loja -> sessão é renovada por mais 5 minutos
-    const t4min = t0 + 4 * 60 * 1000;
+    // Dentro do limite de inatividade, o cliente interage na loja -> sessão é renovada
+    const tAtivo = t0 + Math.floor(IDLE_TIMEOUT_MS * 0.8);
     const clienteAtivo = await validarERenovarSessaoClienteLoja(
       ctx.d1,
       sessaoLoja.token,
       'loja-timeout',
-      t4min,
+      tAtivo,
     );
     assert.ok(clienteAtivo);
     assert.equal(clienteAtivo.nome, 'Cliente Loja Teste');
 
-    // Após 5 minutos e 1 segundo sem atividade desde t4min, a conexão na loja deve cair
-    const tExpirado = t4min + 5 * 60 * 1000 + 1000;
+    // Após IDLE_TIMEOUT_MS + 1 segundo sem atividade desde tAtivo, a conexão na loja deve cair
+    const tExpirado = tAtivo + IDLE_TIMEOUT_MS + 1000;
     const clienteExpirado = await validarERenovarSessaoClienteLoja(
       ctx.d1,
       sessaoLoja.token,
@@ -454,5 +456,24 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.ok(payload.includes('5406189.90'));
     assert.ok(payload.includes('PEDIDO42'));
     assert.match(payload, /6304[0-9A-F]{4}$/);
+  });
+
+  test('gera Web App Manifest PWA dinâmico personalizado por loja', () => {
+    const manifest = gerarManifestoPwaLoja({
+      codigo: 'vanderltda',
+      nome: 'Vander Evaristo Store',
+      cor_primaria: '#3483fa',
+      cor_secundaria: '#ffe600',
+      cor_fundo: '#ebebeb',
+      loja_logo: null,
+    });
+
+    assert.equal(manifest.name, 'Vander Evaristo Store');
+    assert.equal(manifest.display, 'standalone');
+    assert.equal(manifest.start_url, '/loja/vanderltda');
+    assert.equal(manifest.scope, '/loja/vanderltda');
+    assert.equal(manifest.theme_color, '#ffe600');
+    assert.equal(manifest.background_color, '#ebebeb');
+    assert.ok(Array.isArray(manifest.icons) && manifest.icons.length >= 2);
   });
 });

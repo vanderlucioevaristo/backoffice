@@ -1,7 +1,15 @@
 import { defineMiddleware } from 'astro:middleware';
 import { ensureSchema, getSessionUser, SESSION_COOKIE, IDLE_TIMEOUT_SEC } from './lib/auth';
 
-const PUBLIC = ['/login', '/cadastro-empresa', '/recuperar-senha'];
+const PUBLIC = [
+  '/login',
+  '/cadastro-empresa',
+  '/recuperar-senha',
+  '/manifest.webmanifest',
+  '/sw.js',
+  '/icon-backoffice.svg',
+  '/favicon.svg',
+];
 
 export const onRequest = defineMiddleware(async (ctx, next) => {
   await ensureSchema();

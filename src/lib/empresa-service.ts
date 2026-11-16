@@ -3,7 +3,7 @@ import { onlyDigits, validCNPJ, validEmail } from './validate.ts';
 const ITERATIONS = 100_000;
 const enc = new TextEncoder();
 
-export const IDLE_TIMEOUT_SEC = 5 * 60; // 5 minutos (300 segundos)
+export const IDLE_TIMEOUT_SEC = 10 * 60; // 10 minutos (600 segundos)
 export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_SEC * 1000;
 
 const toB64 = (buf: ArrayBuffer | Uint8Array) =>

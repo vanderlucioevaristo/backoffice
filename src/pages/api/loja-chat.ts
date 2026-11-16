@@ -41,19 +41,17 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
   const token = cookies.get(CLIENT_SESSION_COOKIE)?.value;
   const cliente = token ? await getSessionClient(token, empresa.codigo) : null;
-  if (token && !cliente) {
-    cookies.delete(CLIENT_SESSION_COOKIE, { path: '/' });
-    return json({ sessaoExpirada: true, erro: 'Sua sessão expirou por inatividade.' }, 401);
+  if (!cliente) {
+    if (token) cookies.delete(CLIENT_SESSION_COOKIE, { path: '/' });
+    return json({ sessaoExpirada: true, erro: 'Faça login para utilizar o assistente virtual.' }, 401);
   }
-  if (token && cliente) {
-    cookies.set(CLIENT_SESSION_COOKIE, token, {
-      httpOnly: true,
-      secure: import.meta.env.PROD,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: IDLE_TIMEOUT_SEC,
-    });
-  }
+  cookies.set(CLIENT_SESSION_COOKIE, token!, {
+    httpOnly: true,
+    secure: import.meta.env.PROD,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: IDLE_TIMEOUT_SEC,
+  });
 
   // Carrega os pedidos do cliente autenticado (se estiver logado)
   let meusPedidos: any[] = [];
@@ -96,32 +94,38 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     .bind(empresa.id)
     .all<any>();
 
-  // Carrega serviços disponíveis para agendamento e os agendamentos DO PRÓPRIO cliente logado
-  const { results: servicos } = await db()
-    .prepare(
-      `SELECT id, nome, descricao, duracao_minutos, preco
-         FROM servicos
-        WHERE empresa_id = ? AND ativo = 1
-        ORDER BY nome COLLATE NOCASE`,
-    )
-    .bind(empresa.id)
-    .all<any>();
-
+  // Carrega serviços e agendamentos somente quando a agenda estiver habilitada na loja
+  const agendaHabilitada = empresa.agenda_ativa === 1;
+  let servicos: any[] = [];
   let meusAgendamentos: any[] = [];
-  if (cliente) {
-    const { results: ags } = await db()
+
+  if (agendaHabilitada) {
+    const { results: srvs } = await db()
       .prepare(
-        `SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco, a.status, a.observacoes,
-                s.nome AS servico_nome
-           FROM agendamentos a
-           JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
-          WHERE a.empresa_id = ? AND a.parceiro_id = ?
-          ORDER BY a.data DESC, a.hora_inicio DESC
-          LIMIT 10`,
+        `SELECT id, nome, descricao, duracao_minutos, preco
+           FROM servicos
+          WHERE empresa_id = ? AND ativo = 1
+          ORDER BY nome COLLATE NOCASE`,
       )
-      .bind(empresa.id, cliente.id)
+      .bind(empresa.id)
       .all<any>();
-    meusAgendamentos = ags;
+    servicos = srvs;
+
+    if (cliente) {
+      const { results: ags } = await db()
+        .prepare(
+          `SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco, a.status, a.observacoes,
+                  s.nome AS servico_nome
+             FROM agendamentos a
+             JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
+            WHERE a.empresa_id = ? AND a.parceiro_id = ?
+            ORDER BY a.data DESC, a.hora_inicio DESC
+            LIMIT 10`,
+        )
+        .bind(empresa.id, cliente.id)
+        .all<any>();
+      meusAgendamentos = ags;
+    }
   }
 
   const diasFuncionamento = DIAS_SEMANA_LABELS.filter((d) =>
@@ -211,8 +215,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   // Motor inteligente local com acesso em tempo real aos pedidos do cliente, produtos, estoque e suporte
   const msgNorm = normalizar(mensagem);
 
-  // 1. Consulta a um número específico de agendamento ("agendamento #1" ou "agendamento 1")
-  const matchAgendamentoNum = msgNorm.match(/agendamento\s*#?\s*(\d+)/);
+  // 1. Consulta a um número específico de agendamento ("agendamento #1" ou "agendamento 1") — apenas se a agenda estiver ativa
+  const matchAgendamentoNum = agendaHabilitada ? msgNorm.match(/agendamento\s*#?\s*(\d+)/) : null;
   if (matchAgendamentoNum) {
     const numAg = Number(matchAgendamentoNum[1]);
     if (!cliente) {
@@ -280,8 +284,9 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     });
   }
 
-  // 2. Perguntas sobre agenda, agendamentos, serviços, procedimentos, horários disponíveis ou marcação
+  // 2. Perguntas sobre agenda, agendamentos, serviços, procedimentos, horários disponíveis ou marcação (somente quando agenda estiver ativa na loja)
   if (
+    agendaHabilitada &&
     /\b(agenda|agendamento|agendamentos|agendar|agendei|marcar|marcado|servico|servicos|procedimento|procedimentos|consulta|duracao|vaga|vagas|disponibilidade|dias de funcionamento)\b/.test(
       msgNorm,
     )
@@ -471,11 +476,15 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       `Olá${cliente ? `, **${cliente.nome}**` : ''}! 👋 Sou o assistente virtual da **${empresa.nome}**.`,
       'Posso ajudar você agora mesmo com:',
       '• 📦 **Meus pedidos:** pergunte *"qual o status dos meus pedidos"* ou *"pedido #1"*',
-      '• 📅 **Agendamentos e Serviços:** pergunte *"quais os meus agendamentos"* ou *"quais serviços posso agendar"*',
+      agendaHabilitada
+        ? '• 📅 **Agendamentos e Serviços:** pergunte *"quais os meus agendamentos"* ou *"quais serviços posso agendar"*'
+        : '',
       '• 🏷️ **Produtos e Estoque:** digite o nome de um produto para ver preço e quantidade disponível',
       '• 📞 **Suporte e Contato:** pergunte sobre *"horário de atendimento"*, *"WhatsApp"*, *"trocas"* ou *"endereço"*',
       '',
       'Como posso ajudar você hoje?',
-    ].join('\n'),
+    ]
+      .filter((l) => l !== '')
+      .join('\n'),
   });
 };

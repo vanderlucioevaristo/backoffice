@@ -1,6 +1,6 @@
 ---
 import '../styles/global.css';
-import type { LojaEmpresa, SessionClient } from '../lib/auth';
+import { IDLE_TIMEOUT_MS, type LojaEmpresa, type SessionClient } from '../lib/auth';
 import { formatDoc } from '../lib/validate';
 
 interface Props {
@@ -881,7 +881,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       }
     </style>
   </head>
-  <body data-sair-url={!bare && cliente ? `${baseUrl}/sair?expirado=1` : ''}>
+  <body data-sair-url={!bare && cliente ? `${baseUrl}/sair?expirado=1` : ''} data-idle-ms={IDLE_TIMEOUT_MS}>
     <header class="ml-header">
       <div class="ml-header-inner">
         <div class="ml-top-row">
@@ -1058,46 +1058,60 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       </div>
     </footer>
 
-    <!-- Assistente Virtual da Loja (Pedidos, Produtos e Suporte) -->
-    <button type="button" class="bot-fab" id="bot-fab" aria-label="Abrir assistente virtual">
-      <span>💬</span>
-      <span>Dúvidas? Assistente</span>
-    </button>
+    <!-- Assistente Virtual da Loja (exibido somente após o cliente fazer login) -->
+    {!bare && cliente && (
+      <>
+        <button type="button" class="bot-fab" id="bot-fab" aria-label="Abrir assistente virtual">
+          <span>💬</span>
+          <span>Dúvidas? Assistente</span>
+        </button>
 
-    <div class="bot-win" id="bot-win" data-empresa={empresa.codigo}>
-      <div class="bot-head">
-        <div>
-          <div class="bot-head-title">🤖 Assistente · {empresa.nome}</div>
-          <div class="bot-head-sub">Tire dúvidas sobre pedidos, agendamentos e produtos</div>
+        <div class="bot-win" id="bot-win" data-empresa={empresa.codigo}>
+          <div class="bot-head">
+            <div>
+              <div class="bot-head-title">🤖 Assistente · {empresa.nome}</div>
+              <div class="bot-head-sub">
+                {empresa.agenda_ativa === 1
+                  ? 'Tire dúvidas sobre pedidos, agendamentos e produtos'
+                  : 'Tire dúvidas sobre seus pedidos e produtos'}
+              </div>
+            </div>
+            <button type="button" class="bot-close" id="bot-close" title="Fechar">✕</button>
+          </div>
+
+          <div class="bot-msgs" id="bot-msgs">
+            <div class="bot-bubble bot">
+              Olá, <strong>{cliente.nome}</strong>! 👋 Sou o assistente da <strong>{empresa.nome}</strong>.<br />
+              Posso consultar o <strong>status dos seus pedidos</strong>,{empresa.agenda_ativa === 1 ? <> seus <strong>agendamentos e serviços</strong>,</> : ''} verificar <strong>preços e estoque de produtos</strong> ou informar nossos <strong>canais de suporte</strong>. Como posso ajudar?
+            </div>
+          </div>
+
+          <div class="bot-chips">
+            <button type="button" class="bot-chip" data-ask="Qual o status dos meus pedidos?">📦 Meus pedidos</button>
+            {empresa.agenda_ativa === 1 && (
+              <button type="button" class="bot-chip" data-ask="Quais são os meus agendamentos e serviços disponíveis?">📅 Agendamentos</button>
+            )}
+            <button type="button" class="bot-chip" data-ask="Quais produtos estão disponíveis em estoque?">🛍️ Produtos e estoque</button>
+            <button type="button" class="bot-chip" data-ask="Qual o telefone, WhatsApp e horário de suporte?">📞 Suporte e contato</button>
+            <button type="button" class="bot-chip" data-ask="Qual o endereço da loja?">📍 Endereço</button>
+          </div>
+
+          <form class="bot-form" id="bot-form">
+            <input
+              type="text"
+              id="bot-input"
+              placeholder={
+                empresa.agenda_ativa === 1
+                  ? 'Pergunte sobre pedidos, agendamentos ou produtos...'
+                  : 'Pergunte sobre um pedido ou produto...'
+              }
+              autocomplete="off"
+            />
+            <button type="submit" id="bot-send">Enviar</button>
+          </form>
         </div>
-        <button type="button" class="bot-close" id="bot-close" title="Fechar">✕</button>
-      </div>
-
-      <div class="bot-msgs" id="bot-msgs">
-        <div class="bot-bubble bot">
-          Olá{cliente ? <>, <strong>{cliente.nome}</strong></> : ''}! 👋 Sou o assistente da <strong>{empresa.nome}</strong>.<br />
-          Posso consultar o <strong>status dos seus pedidos</strong>, seus <strong>agendamentos e serviços</strong>, verificar <strong>preços e estoque de produtos</strong> ou informar nossos <strong>canais de suporte</strong>. Como posso ajudar?
-        </div>
-      </div>
-
-      <div class="bot-chips">
-        <button type="button" class="bot-chip" data-ask="Qual o status dos meus pedidos?">📦 Meus pedidos</button>
-        <button type="button" class="bot-chip" data-ask="Quais são os meus agendamentos e serviços disponíveis?">📅 Agendamentos</button>
-        <button type="button" class="bot-chip" data-ask="Quais produtos estão disponíveis em estoque?">🛍️ Produtos e estoque</button>
-        <button type="button" class="bot-chip" data-ask="Qual o telefone, WhatsApp e horário de suporte?">📞 Suporte e contato</button>
-        <button type="button" class="bot-chip" data-ask="Qual o endereço da loja?">📍 Endereço</button>
-      </div>
-
-      <form class="bot-form" id="bot-form">
-        <input
-          type="text"
-          id="bot-input"
-          placeholder="Pergunte sobre pedidos, agendamentos ou produtos..."
-          autocomplete="off"
-        />
-        <button type="submit" id="bot-send">Enviar</button>
-      </form>
-    </div>
+      </>
+    )}
 
     <script is:inline>
       (function () {
@@ -1183,12 +1197,12 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         });
       })();
 
-      // Desconexão automática por inatividade na Loja Virtual (5 minutos sem executar nada)
+      // Desconexão automática por inatividade na Loja Virtual
       (function () {
         const sairUrl = document.body.getAttribute('data-sair-url');
         const logoutForm = document.getElementById('loja-logout-form');
         if (!sairUrl && !logoutForm) return;
-        const IDLE_LIMIT_MS = 5 * 60 * 1000; // 5 minutos
+        const IDLE_LIMIT_MS = Number(document.body.getAttribute('data-idle-ms')) || 5 * 60 * 1000;
         let timer;
         function dropClientSession() {
           if (logoutForm) {

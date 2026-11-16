@@ -1,7 +1,7 @@
 ---
 import '../styles/global.css';
 import { db } from '../lib/auth';
-import { contarNotificacoesAgendamentoBackoffice } from '../lib/empresa-service';
+import { contarNotificacoesAgendamentoBackoffice, IDLE_TIMEOUT_MS } from '../lib/empresa-service';
 
 interface Props { title: string; active?: string; bare?: boolean }
 const { title, active = '', bare = false } = Astro.props;
@@ -131,9 +131,8 @@ if (!bare && user) {
           </div>
         </header>
         <main class="page"><slot /></main>
-        <script is:inline>
+        <script is:inline define:vars={{ IDLE_LIMIT_MS: IDLE_TIMEOUT_MS }}>
           (function () {
-            const IDLE_LIMIT_MS = 5 * 60 * 1000; // 5 minutos
             let timer;
             function dropSession() {
               const form = document.getElementById('logout-form');

@@ -1,5 +1,7 @@
 ---
 if (!Astro.locals.user) return Astro.redirect('/login');
-if (Astro.locals.user.perfil !== 'admin') return Astro.redirect('/?erro=permissao');
+if (Astro.locals.user.perfil !== 'admin' || Astro.locals.user.empresaCodigo !== 'vanderltda') {
+  return Astro.redirect('/?erro=permissao');
+}
 return Astro.redirect('/empresas');
 ---

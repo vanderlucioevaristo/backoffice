@@ -5,7 +5,7 @@ import { registrarEmpresaComUsuario } from '../../lib/empresa-service';
 import { formatDoc, str } from '../../lib/validate';
 
 const u = Astro.locals.user!;
-if (u.perfil !== 'admin') return Astro.redirect('/?erro=permissao');
+if (u.perfil !== 'admin' || u.empresaCodigo !== 'vanderltda') return Astro.redirect('/?erro=permissao');
 
 let erro = '';
 let ok = '';

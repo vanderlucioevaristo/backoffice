@@ -44,11 +44,12 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     }
     return ctx.redirect('/login');
   }
+  if (path.startsWith('/usuarios') && user?.perfil !== 'admin') {
+    return ctx.redirect('/?erro=permissao');
+  }
   if (
-    (path.startsWith('/usuarios') ||
-      path.startsWith('/empresas') ||
-      path === '/cadastro-empresa') &&
-    user?.perfil !== 'admin'
+    (path.startsWith('/empresas') || path === '/cadastro-empresa') &&
+    (user?.perfil !== 'admin' || user?.empresaCodigo !== 'vanderltda')
   ) {
     return ctx.redirect('/?erro=permissao');
   }

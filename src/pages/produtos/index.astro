@@ -21,8 +21,8 @@ const where = ['p.empresa_id = ?'];
 const args: unknown[] = [u.empresaId];
 
 if (q) {
-  where.push('(p.nome LIKE ? OR p.codigo LIKE ? OR p.codigo_barras LIKE ? OR p.categoria LIKE ? OR p.marca LIKE ?)');
-  args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  where.push('(p.nome LIKE ? OR p.codigo LIKE ? OR p.codigo_barras LIKE ? OR p.categoria LIKE ? OR p.marca LIKE ? OR p.cor LIKE ?)');
+  args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
 }
 if (fornecedorId > 0) {
   where.push('EXISTS (SELECT 1 FROM produtos_fornecedores pf WHERE pf.produto_id = p.id AND pf.empresa_id = p.empresa_id AND pf.fornecedor_id = ?)');
@@ -38,7 +38,7 @@ const W = where.join(' AND ');
 const total = (await db().prepare(`SELECT COUNT(*) n FROM produtos p WHERE ${W}`).bind(...args).first<{ n: number }>())!.n;
 const { results } = await db()
   .prepare(
-    `SELECT p.id, p.codigo, p.nome, p.categoria, p.marca, p.unidade, p.foto,
+    `SELECT p.id, p.codigo, p.nome, p.categoria, p.marca, p.cor, p.peso_kg, p.unidade, p.foto,
             p.preco_custo, p.preco_venda, p.estoque_atual, p.estoque_minimo, p.ativo,
             (SELECT GROUP_CONCAT(pa.nome, ', ')
                FROM produtos_fornecedores pf
@@ -100,10 +100,11 @@ const ok = sp.get('ok');
           <th>Preço Venda</th>
           <th>Estoque</th>
           <th>Situação</th>
+          <th class="num">Ação</th>
         </tr>
       </thead>
       <tbody>
-        {results.length === 0 && <tr><td colspan="7" class="muted">Nenhum produto encontrado.</td></tr>}
+        {results.length === 0 && <tr><td colspan="8" class="muted">Nenhum produto encontrado.</td></tr>}
         {results.map((r) => {
           const baixo = r.estoque_minimo > 0 && r.estoque_atual <= r.estoque_minimo;
           return (
@@ -120,9 +121,16 @@ const ok = sp.get('ok');
                   )}
                   <div>
                     <a href={`/produtos/${r.id}`}>{r.nome}</a>
-                    {(r.categoria || r.marca) && (
+                    {(r.categoria || r.marca || r.cor || r.peso_kg) && (
                       <div class="muted" style="font-size:12px">
-                        {[r.categoria, r.marca].filter(Boolean).join(' · ')}
+                        {[
+                          r.categoria,
+                          r.marca,
+                          r.cor ? `Cor: ${r.cor}` : '',
+                          r.peso_kg ? `${Number(r.peso_kg).toFixed(3)} kg` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </div>
                     )}
                   </div>
@@ -136,6 +144,9 @@ const ok = sp.get('ok');
                 {baixo && <span class="tag f" title={`Mínimo: ${formatQty(r.estoque_minimo)}`}>Baixo</span>}
               </td>
               <td>{r.ativo ? 'Ativo' : <span class="tag off">Inativo</span>}</td>
+              <td class="num">
+                <a class="btn sm sec" href={`/produtos/${r.id}`}>✏️ Editar</a>
+              </td>
             </tr>
           );
         })}

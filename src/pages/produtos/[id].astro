@@ -27,6 +27,7 @@ type FornVinculo = {
 let erro = '';
 let p: Record<string, any> = {
   unidade: 'UN',
+  cor: '',
   preco_custo: 0,
   preco_venda: 0,
   estoque_atual: 0,
@@ -43,19 +44,23 @@ let vinculos: FornVinculo[] = [];
 if (!isNew) {
   const row = await db().prepare('SELECT * FROM produtos WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).first<any>();
   if (!row) return Astro.redirect('/produtos');
-  p = row;
+  p = { ...p, ...row };
 
-  const { results: vincs } = await db()
-    .prepare(
-      `SELECT fornecedor_id, COALESCE(codigo_fornecedor,'') codigo_fornecedor,
-              ultimo_preco, COALESCE(ultimo_nf,'') ultimo_nf, COALESCE(data_ultima_nf,'') data_ultima_nf, preferencial
-         FROM produtos_fornecedores
-        WHERE produto_id = ? AND empresa_id = ?
-        ORDER BY preferencial DESC, id ASC`,
-    )
-    .bind(id, u.empresaId)
-    .all<FornVinculo>();
-  vinculos = vincs;
+  try {
+    const { results: vincs } = await db()
+      .prepare(
+        `SELECT fornecedor_id, COALESCE(codigo_fornecedor,'') codigo_fornecedor,
+                ultimo_preco, COALESCE(ultimo_nf,'') ultimo_nf, COALESCE(data_ultima_nf,'') data_ultima_nf, preferencial
+           FROM produtos_fornecedores
+          WHERE produto_id = ? AND empresa_id = ?
+          ORDER BY preferencial DESC, id ASC`,
+      )
+      .bind(id, u.empresaId)
+      .all<FornVinculo>();
+    vinculos = vincs;
+  } catch {
+    vinculos = [];
+  }
 }
 
 if (Astro.request.method === 'POST') {
@@ -78,6 +83,7 @@ if (Astro.request.method === 'POST') {
     descricao: str(f, 'descricao', 1000),
     categoria: str(f, 'categoria', 100),
     marca: str(f, 'marca', 100),
+    cor: str(f, 'cor', 60),
     unidade: UNIDADES.includes(unid) ? unid : 'UN',
     ncm: onlyDigits(str(f, 'ncm', 20)),
     preco_custo: parseNum(f.get('preco_custo'), 0),
@@ -157,7 +163,7 @@ if (Astro.request.method === 'POST') {
 
   if (!erro) {
     const cols = [
-      'codigo','codigo_barras','nome','descricao','categoria','marca','unidade','ncm',
+      'codigo','codigo_barras','nome','descricao','categoria','marca','cor','unidade','ncm',
       'preco_custo','preco_venda','estoque_atual','estoque_minimo',
       'peso_kg','comprimento_cm','largura_cm','altura_cm','formato_correios',
       'localizacao','observacoes','foto','ativo',
@@ -245,17 +251,33 @@ const rowsToRender: FornVinculo[] =
           <input name="ncm" value={v('ncm')} inputmode="numeric" maxlength="10" placeholder="00000000" />
         </div>
 
-        <div class="c4">
+        <div class="c3">
           <label>Categoria / Grupo</label>
           <input name="categoria" value={v('categoria')} />
         </div>
-        <div class="c4">
+        <div class="c3">
           <label>Marca / Fabricante</label>
           <input name="marca" value={v('marca')} />
         </div>
-        <div class="c4">
+        <div class="c2">
+          <label>Cor do produto</label>
+          <input name="cor" value={v('cor')} placeholder="Ex.: Prata, Preto..." />
+        </div>
+        <div class="c2">
+          <label>Peso (kg) *</label>
+          <input
+            name="peso_kg"
+            id="inp-peso-kg"
+            type="number"
+            step="0.001"
+            min="0.001"
+            value={p.peso_kg ?? 0.3}
+            required
+          />
+        </div>
+        <div class="c2">
           <label>Localização no estoque</label>
-          <input name="localizacao" value={v('localizacao')} placeholder="Ex.: Corredor A, Prat. 3" />
+          <input name="localizacao" value={v('localizacao')} placeholder="Ex.: Prat. 3" />
         </div>
 
         <div class="c12">
@@ -338,19 +360,7 @@ const rowsToRender: FornVinculo[] =
             <option value="3" selected={p.formato_correios === 3}>3 — Envelope</option>
           </select>
         </div>
-        <div class="c2">
-          <label>Peso bruto (kg) *</label>
-          <input
-            name="peso_kg"
-            id="inp-peso-kg"
-            type="number"
-            step="0.001"
-            min="0.01"
-            value={p.peso_kg ?? 0.3}
-            required
-          />
-        </div>
-        <div class="c2">
+        <div class="c3">
           <label>Comprimento (cm) *</label>
           <input
             name="comprimento_cm"
@@ -363,7 +373,7 @@ const rowsToRender: FornVinculo[] =
             required
           />
         </div>
-        <div class="c2">
+        <div class="c3">
           <label>Largura (cm) *</label>
           <input
             name="largura_cm"

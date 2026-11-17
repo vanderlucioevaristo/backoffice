@@ -931,7 +931,10 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
 
           {!bare && cliente && (
             <div class="ml-user-links">
-              <span class="ml-user-hello">Olá, <strong>{cliente.nome.split(' ')[0]}</strong></span>
+              <a href={`${baseUrl}/meu-cadastro`} class="ml-user-hello" title="Alterar meu cadastro e endereço">
+                Olá, <strong>{cliente.nome.split(' ')[0]}</strong>
+              </a>
+              <a href={`${baseUrl}/meu-cadastro`}>Meu Cadastro</a>
               {empresa.agenda_ativa === 1 && (
                 <a href={`${baseUrl}/agenda`} style="font-weight:700">📅 {empresa.agenda_menu_texto || 'Agenda'}</a>
               )}
@@ -1076,6 +1079,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
           {cliente && (
             <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
               <a href={baseUrl}>• Catálogo de produtos</a>
+              <a href={`${baseUrl}/meu-cadastro`}>• Alterar meu cadastro / endereço</a>
               {empresa.agenda_ativa === 1 && (
                 <a href={`${baseUrl}/agenda`}>• {empresa.agenda_menu_texto || 'Agendar serviço'}</a>
               )}

@@ -1,0 +1,376 @@
+---
+import LojaLayout from '../../../layouts/LojaLayout.astro';
+import {
+  db,
+  getLojaEmpresa,
+  getSessionClient,
+  hashPassword,
+  CLIENT_SESSION_COOKIE,
+  IDLE_TIMEOUT_SEC,
+} from '../../../lib/auth';
+import {
+  str,
+  onlyDigits,
+  cleanDoc,
+  validCPF,
+  validCNPJ,
+  validEmail,
+  formatDoc,
+  UFS,
+} from '../../../lib/validate';
+
+const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
+const empresa = await getLojaEmpresa(empCodigo);
+if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
+
+const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
+const cliente = token ? await getSessionClient(token, empCodigo) : null;
+if (!cliente) {
+  if (token) {
+    Astro.cookies.delete(CLIENT_SESSION_COOKIE, { path: '/' });
+    return Astro.redirect(`/loja/${empCodigo}/login?expirado=1`);
+  }
+  return Astro.redirect(`/loja/${empCodigo}/login`);
+}
+Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
+  httpOnly: true,
+  secure: import.meta.env.PROD,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: IDLE_TIMEOUT_SEC,
+});
+
+let p = await db()
+  .prepare('SELECT * FROM parceiros WHERE id = ? AND empresa_id = ?')
+  .bind(cliente.id, empresa.id)
+  .first<Record<string, any>>();
+
+if (!p) return Astro.redirect(`/loja/${empCodigo}/login`);
+if (!p.cnpj_novo_formato && p.documento && /[A-Z]/i.test(p.documento)) {
+  p.cnpj_novo_formato = 1;
+}
+
+let erro = '';
+let ok = false;
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const tipo = f.get('tipo_pessoa') === 'J' ? 'J' : 'F';
+  const cnpjNovoFormato = tipo === 'J' && f.get('cnpj_novo_formato') ? 1 : 0;
+  const rawDoc = str(f, 'documento', 30);
+  const docLimpo = tipo === 'J' && cnpjNovoFormato ? cleanDoc(rawDoc) : onlyDigits(rawDoc);
+  const novaSenha = String(f.get('nova_senha') ?? '');
+  const confirmarSenha = String(f.get('confirmar_senha') ?? '');
+
+  p = {
+    ...p,
+    tipo_pessoa: tipo,
+    cnpj_novo_formato: cnpjNovoFormato,
+    nome: str(f, 'nome'),
+    nome_fantasia: str(f, 'nome_fantasia'),
+    documento: docLimpo,
+    rg_ie: str(f, 'rg_ie', 30),
+    email: str(f, 'email').toLowerCase(),
+    telefone: str(f, 'telefone', 30),
+    celular: str(f, 'celular', 30),
+    cep: onlyDigits(str(f, 'cep', 12)),
+    logradouro: str(f, 'logradouro'),
+    numero: str(f, 'numero', 20),
+    complemento: str(f, 'complemento', 100),
+    bairro: str(f, 'bairro', 100),
+    cidade: str(f, 'cidade', 100),
+    uf: str(f, 'uf', 2).toUpperCase(),
+  };
+
+  if (!p.nome) erro = tipo === 'F' ? 'Informe seu nome completo.' : 'Informe a razão social.';
+  else if (!p.documento) erro = tipo === 'F' ? 'Informe o CPF.' : 'Informe o CNPJ.';
+  else if (tipo === 'F' && !validCPF(p.documento)) erro = 'CPF inválido.';
+  else if (tipo === 'J' && !validCNPJ(p.documento, !!cnpjNovoFormato)) erro = 'CNPJ inválido.';
+  else if (!p.email || !validEmail(p.email)) erro = 'Informe um e-mail válido.';
+  else if (p.uf && !UFS.includes(p.uf)) erro = 'UF inválida.';
+  else if (novaSenha && novaSenha.length < 6) erro = 'A nova senha deve ter pelo menos 6 caracteres.';
+  else if (novaSenha && novaSenha !== confirmarSenha) erro = 'A confirmação da nova senha não confere.';
+
+  if (!erro) {
+    const dup = await db()
+      .prepare('SELECT id FROM parceiros WHERE empresa_id = ? AND documento = ? AND id <> ?')
+      .bind(empresa.id, p.documento, cliente.id)
+      .first<{ id: number }>();
+
+    if (dup) {
+      erro = 'Já existe outro cadastro nesta loja utilizando este CPF/CNPJ.';
+    } else {
+      if (novaSenha) {
+        const novoHash = await hashPassword(novaSenha);
+        await db()
+          .prepare(
+            `UPDATE parceiros
+                SET tipo_pessoa = ?, cnpj_novo_formato = ?, nome = ?, nome_fantasia = ?,
+                    documento = ?, rg_ie = ?, email = ?, telefone = ?, celular = ?,
+                    cep = ?, logradouro = ?, numero = ?, complemento = ?, bairro = ?, cidade = ?, uf = ?,
+                    senha_hash = ?, atualizado_em = datetime('now')
+              WHERE id = ? AND empresa_id = ?`,
+          )
+          .bind(
+            p.tipo_pessoa,
+            p.cnpj_novo_formato,
+            p.nome,
+            p.nome_fantasia || null,
+            p.documento,
+            p.rg_ie || null,
+            p.email,
+            p.telefone || null,
+            p.celular || null,
+            p.cep || null,
+            p.logradouro || null,
+            p.numero || null,
+            p.complemento || null,
+            p.bairro || null,
+            p.cidade || null,
+            p.uf || null,
+            novoHash,
+            cliente.id,
+            empresa.id,
+          )
+          .run();
+      } else {
+        await db()
+          .prepare(
+            `UPDATE parceiros
+                SET tipo_pessoa = ?, cnpj_novo_formato = ?, nome = ?, nome_fantasia = ?,
+                    documento = ?, rg_ie = ?, email = ?, telefone = ?, celular = ?,
+                    cep = ?, logradouro = ?, numero = ?, complemento = ?, bairro = ?, cidade = ?, uf = ?,
+                    atualizado_em = datetime('now')
+              WHERE id = ? AND empresa_id = ?`,
+          )
+          .bind(
+            p.tipo_pessoa,
+            p.cnpj_novo_formato,
+            p.nome,
+            p.nome_fantasia || null,
+            p.documento,
+            p.rg_ie || null,
+            p.email,
+            p.telefone || null,
+            p.celular || null,
+            p.cep || null,
+            p.logradouro || null,
+            p.numero || null,
+            p.complemento || null,
+            p.bairro || null,
+            p.cidade || null,
+            p.uf || null,
+            cliente.id,
+            empresa.id,
+          )
+          .run();
+      }
+      cliente.nome = p.nome;
+      ok = true;
+    }
+  }
+}
+
+const countCart = await db()
+  .prepare('SELECT COALESCE(SUM(quantidade), 0) AS n FROM loja_carrinho WHERE empresa_id = ? AND parceiro_id = ?')
+  .bind(empresa.id, cliente.id)
+  .first<{ n: number }>();
+
+const v = (k: string) => p[k] ?? '';
+const pj = p.tipo_pessoa === 'J';
+const baseUrl = `/loja/${empCodigo}`;
+---
+<LojaLayout title="Meu Cadastro" empresa={empresa} cliente={cliente} qtdCarrinho={Number(countCart?.n ?? 0)}>
+  <div class="row" style="margin-bottom:14px">
+    <h1 style="margin:0">👤 Meu Cadastro</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href={baseUrl}>← Voltar aos produtos</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">✅ Seus dados cadastrais foram atualizados com sucesso!</div>}
+
+  <form method="post" id="form-meu-cad" class="card">
+    <p class="muted" style="margin-top:0;font-size:13px">
+      Mantenha seu endereço, CEP e contatos atualizados para o cálculo automático de frete e entrega dos seus pedidos.
+    </p>
+
+    <div class="grid">
+      <div class="c4">
+        <label>Tipo de pessoa *</label>
+        <select name="tipo_pessoa" id="tipo">
+          <option value="F" selected={!pj}>Pessoa Física (CPF)</option>
+          <option value="J" selected={pj}>Pessoa Jurídica (CNPJ)</option>
+        </select>
+      </div>
+      <div class="c4">
+        <div class="row" style="justify-content:space-between;margin-bottom:4px;gap:6px">
+          <label id="lbl-doc" style="margin:0">{pj ? 'CNPJ *' : 'CPF *'}</label>
+          <label
+            id="wrap-cnpj-novo"
+            class="check"
+            style={`font-size:12px;margin:0;color:var(--pr);font-weight:600;${pj ? 'display:inline-flex' : 'display:none'}`}
+          >
+            <input type="checkbox" name="cnpj_novo_formato" id="chk-cnpj-novo" value="1" checked={!!p.cnpj_novo_formato} />
+            Novo formato
+          </label>
+        </div>
+        <input
+          name="documento"
+          id="inp-doc"
+          value={formatDoc(v('documento'))}
+          required
+          inputmode={pj && p.cnpj_novo_formato ? 'text' : 'numeric'}
+          maxlength="18"
+          style="text-transform:uppercase"
+        />
+      </div>
+      <div class="c4">
+        <label id="lbl-rg">{pj ? 'Inscrição estadual' : 'RG'}</label>
+        <input name="rg_ie" value={v('rg_ie')} />
+      </div>
+
+      <div class="c8">
+        <label id="lbl-nome">{pj ? 'Razão social *' : 'Nome completo *'}</label>
+        <input name="nome" value={v('nome')} required />
+      </div>
+      <div class="c4">
+        <label id="lbl-fantasia">{pj ? 'Nome fantasia' : 'Apelido'}</label>
+        <input name="nome_fantasia" value={v('nome_fantasia')} />
+      </div>
+
+      <div class="c6">
+        <label>E-mail *</label>
+        <input name="email" type="email" value={v('email')} required />
+      </div>
+      <div class="c3">
+        <label>Celular / WhatsApp</label>
+        <input name="celular" value={v('celular')} />
+      </div>
+      <div class="c3">
+        <label>Telefone</label>
+        <input name="telefone" value={v('telefone')} />
+      </div>
+
+      <div class="c12">
+        <div class="row" style="margin-top:4px">
+          <strong>Endereço de entrega (usado no cálculo automático de frete via Correios)</strong>
+          <span id="cep-status" class="muted" style="font-size:12px"></span>
+        </div>
+      </div>
+      <div class="c3">
+        <label>CEP</label>
+        <input name="cep" id="inp-cep" value={v('cep')} inputmode="numeric" maxlength="9" placeholder="00000-000" />
+      </div>
+      <div class="c6">
+        <label>Logradouro</label>
+        <input name="logradouro" value={v('logradouro')} />
+      </div>
+      <div class="c3">
+        <label>Número</label>
+        <input name="numero" value={v('numero')} />
+      </div>
+      <div class="c4">
+        <label>Complemento</label>
+        <input name="complemento" value={v('complemento')} />
+      </div>
+      <div class="c4">
+        <label>Bairro</label>
+        <input name="bairro" value={v('bairro')} />
+      </div>
+      <div class="c3">
+        <label>Cidade</label>
+        <input name="cidade" value={v('cidade')} />
+      </div>
+      <div class="c1" style="grid-column:span 1">
+        <label>UF</label>
+        <select name="uf">
+          <option value=""></option>
+          {UFS.map((s) => <option selected={p.uf === s}>{s}</option>)}
+        </select>
+      </div>
+
+      <div class="c12">
+        <div style="margin-top:6px">
+          <strong>Alterar senha de acesso (opcional)</strong>
+          <span class="muted" style="font-size:12px;margin-left:6px">
+            Deixe em branco caso não queira mudar sua senha atual.
+          </span>
+        </div>
+      </div>
+      <div class="c6">
+        <label>Nova senha (mín. 6 caracteres)</label>
+        <input name="nova_senha" type="password" minlength="6" autocomplete="new-password" />
+      </div>
+      <div class="c6">
+        <label>Confirmar nova senha</label>
+        <input name="confirmar_senha" type="password" minlength="6" autocomplete="new-password" />
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:18px;gap:10px">
+      <button>💾 Salvar alterações do cadastro</button>
+      <a class="btn sec" href={baseUrl}>Voltar à loja</a>
+    </div>
+  </form>
+</LojaLayout>
+
+<script is:inline>
+  const form = document.getElementById('form-meu-cad');
+  const t = document.getElementById('tipo');
+  const wrapCnpjNovo = document.getElementById('wrap-cnpj-novo');
+  const chkCnpjNovo = document.getElementById('chk-cnpj-novo');
+  const inpDoc = document.getElementById('inp-doc');
+
+  const setTipo = () => {
+    const j = t.value === 'J';
+    const novoFmt = j && chkCnpjNovo && chkCnpjNovo.checked;
+    document.getElementById('lbl-nome').textContent = j ? 'Razão social *' : 'Nome completo *';
+    document.getElementById('lbl-fantasia').textContent = j ? 'Nome fantasia' : 'Apelido';
+    document.getElementById('lbl-doc').textContent = j ? 'CNPJ *' : 'CPF *';
+    document.getElementById('lbl-rg').textContent = j ? 'Inscrição estadual' : 'RG';
+    if (wrapCnpjNovo) wrapCnpjNovo.style.display = j ? 'inline-flex' : 'none';
+    if (inpDoc) inpDoc.inputMode = novoFmt ? 'text' : 'numeric';
+  };
+  t.addEventListener('change', setTipo);
+  chkCnpjNovo?.addEventListener('change', setTipo);
+  inpDoc?.addEventListener('input', () => {
+    if (t.value === 'J' && /[a-zA-Z]/.test(inpDoc.value) && chkCnpjNovo && !chkCnpjNovo.checked) {
+      chkCnpjNovo.checked = true;
+      setTipo();
+    }
+    inpDoc.value = inpDoc.value.toUpperCase();
+  });
+
+  // Ao digitar CEP de 8 dígitos, carrega endereço dos Correios automaticamente
+  const inpCep = document.getElementById('inp-cep');
+  const cepStatus = document.getElementById('cep-status');
+  let ultimoCep = (inpCep.value || '').replace(/\D/g, '');
+  async function buscarCep() {
+    const cep = (inpCep.value || '').replace(/\D/g, '');
+    if (cep.length !== 8 || cep === ultimoCep) return;
+    ultimoCep = cep;
+    cepStatus.textContent = 'Consultando Correios...';
+    try {
+      const r = await fetch('/api/consulta-cep?cep=' + cep);
+      const data = await r.json();
+      if (r.ok && data.endereco) {
+        const e = data.endereco;
+        if (e.logradouro) form.querySelector('[name="logradouro"]').value = e.logradouro;
+        if (e.bairro) form.querySelector('[name="bairro"]').value = e.bairro;
+        if (e.cidade) form.querySelector('[name="cidade"]').value = e.cidade;
+        if (e.uf) form.querySelector('[name="uf"]').value = e.uf;
+        cepStatus.textContent = '✓ Endereço preenchido';
+        form.querySelector('[name="numero"]')?.focus();
+      } else {
+        cepStatus.textContent = data.erro || '';
+      }
+    } catch {
+      cepStatus.textContent = '';
+    }
+  }
+  inpCep.addEventListener('input', () => {
+    if ((inpCep.value || '').replace(/\D/g, '').length === 8) buscarCep();
+  });
+  inpCep.addEventListener('blur', buscarCep);
+</script>

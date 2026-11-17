@@ -397,8 +397,8 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
       {resumoPedidoConcluido && (
         <div style="padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin:12px 0">
           <div><strong>Modalidade de Entrega:</strong> {resumoPedidoConcluido.freteModalidade} (até {resumoPedidoConcluido.prazoDias} dia(s) útil(eis))</div>
-          <div><strong>Valor do Frete:</strong> R$ {formatMoney(resumoPedidoConcluido.valorFrete)}</div>
-          <div><strong>Total Final do Pedido:</strong> <span style="color:var(--pr);font-weight:800">R$ {formatMoney(resumoPedidoConcluido.valorTotal)}</span></div>
+          <div><strong>Valor do Frete:</strong> {formatMoney(resumoPedidoConcluido.valorFrete)}</div>
+          <div><strong>Total Final do Pedido:</strong> <span style="color:var(--pr);font-weight:800">{formatMoney(resumoPedidoConcluido.valorTotal)}</span></div>
         </div>
       )}
 
@@ -409,7 +409,7 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
               Nubank
             </span>
             <h3 style="margin:0;color:#581c87;font-size:17px">
-              💜 Pagamento do Pedido #{pedidoConcluidoId} — R$ {formatMoney(resumoPedidoConcluido.valorTotal)}
+              💜 Pagamento do Pedido #{pedidoConcluidoId} — {formatMoney(resumoPedidoConcluido.valorTotal)}
             </h3>
           </div>
 
@@ -441,7 +441,7 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
                   Pix Nubank (QR Code ou Copia e Cola)
                 </strong>
                 <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                  Abra o app do seu banco ou Nubank, escolha <strong>Pix Copia e Cola</strong> ou escaneie o QR Code ao lado. O valor de <strong>R$ {formatMoney(resumoPedidoConcluido.valorTotal)}</strong> já está incluído!
+                  Abra o app do seu banco ou Nubank, escolha <strong>Pix Copia e Cola</strong> ou escaneie o QR Code ao lado. O valor de <strong>{formatMoney(resumoPedidoConcluido.valorTotal)}</strong> já está incluído!
                 </p>
                 <div class="row" style="gap:8px">
                   <input
@@ -509,7 +509,7 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
                 <td class="muted" style="font-size:12px">
                   {Number(it.peso_kg).toFixed(2)} kg · {it.comprimento_cm}×{it.largura_cm}×{it.altura_cm} cm
                 </td>
-                <td>R$ {formatMoney(it.preco_venda)}</td>
+                <td>{formatMoney(it.preco_venda)}</td>
                 <td>
                   <form method="post" class="row" style="gap:6px;margin:0">
                     <input type="hidden" name="_acao" value="atualizar" />
@@ -526,7 +526,7 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
                     <button class="btn sec" style="padding:6px 10px">Atualizar</button>
                   </form>
                 </td>
-                <td><strong>R$ {formatMoney(it.quantidade * it.preco_venda)}</strong></td>
+                <td><strong>{formatMoney(it.quantidade * it.preco_venda)}</strong></td>
                 <td>
                   <form method="post" style="margin:0">
                     <input type="hidden" name="_acao" value="remover" />
@@ -599,7 +599,7 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
                     <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px">
                       <span>{op.codigo === 'SEDEX' ? '⚡ ' : op.codigo === 'PAC' ? '📦 ' : '🏪 '}{op.nome}</span>
                       <span style="color:var(--pr)">
-                        {op.valor === 0 ? 'Grátis' : `R$ ${formatMoney(op.valor)}`}
+                        {op.valor === 0 ? 'Grátis' : formatMoney(op.valor)}
                       </span>
                     </div>
                     <div class="muted" style="font-size:12px;margin-top:2px">{op.descricao}</div>
@@ -663,14 +663,14 @@ const freteInicial = cotacaoInicial?.ok ? cotacaoInicial.opcoes[0]?.valor ?? 0 :
           </div>
           <div class="c5" style="text-align:right">
             <div class="muted" style="font-size:13px">
-              Subtotal dos produtos: <strong>R$ {formatMoney(totalCarrinho)}</strong>
+              Subtotal dos produtos: <strong>{formatMoney(totalCarrinho)}</strong>
             </div>
             <div class="muted" style="font-size:13px;margin-top:2px">
-              Frete (Correios): <strong id="lbl-valor-frete">R$ {formatMoney(freteInicial)}</strong>
+              Frete (Correios): <strong id="lbl-valor-frete">{formatMoney(freteInicial)}</strong>
             </div>
             <div class="muted" style="margin-top:6px">Total do pedido</div>
             <div id="lbl-total-pedido" style="font-size:24px;font-weight:800;color:var(--pr)">
-              R$ {formatMoney(totalCarrinho + freteInicial)}
+              {formatMoney(totalCarrinho + freteInicial)}
             </div>
           </div>
         </div>

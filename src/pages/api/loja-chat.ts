@@ -174,7 +174,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
           servicos.length === 0
             ? 'Nenhum serviço cadastrado.'
             : servicos
-                .map((s) => `[${s.nome}: duração ${s.duracao_minutos} min — R$ ${formatMoney(Number(s.preco))}${s.descricao ? ` — ${s.descricao}` : ''}]`)
+                .map((s) => `[${s.nome}: duração ${s.duracao_minutos} min — ${formatMoney(Number(s.preco))}${s.descricao ? ` — ${s.descricao}` : ''}]`)
                 .join('; ')
         }`,
         cliente
@@ -184,7 +184,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
                 : meusAgendamentos
                     .map(
                       (a) =>
-                        `Agendamento #${a.id} em ${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim} (${a.duracao_minutos} min) - Serviço: ${a.servico_nome} - Status: ${a.status} - Valor: R$ ${formatMoney(Number(a.preco))}`,
+                        `Agendamento #${a.id} em ${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim} (${a.duracao_minutos} min) - Serviço: ${a.servico_nome} - Status: ${a.status} - Valor: ${formatMoney(Number(a.preco))}`,
                     )
                     .join(' | ')
             }`
@@ -237,7 +237,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         `• **Data:** ${formatDataBr(ag.data)}`,
         `• **Horário:** ${ag.hora_inicio} às ${ag.hora_fim} (${ag.duracao_minutos} min)`,
         `• **Status:** ${ag.status}`,
-        `• **Valor:** R$ ${formatMoney(Number(ag.preco))}`,
+        `• **Valor:** ${formatMoney(Number(ag.preco))}`,
         ag.observacoes ? `• **Observações:** ${ag.observacoes}` : '',
       ]
         .filter(Boolean)
@@ -298,7 +298,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         blocos.push(`📅 **Seus Agendamentos (${cliente.nome}):**`);
         for (const a of meusAgendamentos.slice(0, 5)) {
           blocos.push(
-            `• **#${a.id} — ${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim}** — **${a.servico_nome}** (${a.duracao_minutos} min) — R$ ${formatMoney(Number(a.preco))} — Status: **${a.status}**`,
+            `• **#${a.id} — ${formatDataBr(a.data)} das ${a.hora_inicio} às ${a.hora_fim}** — **${a.servico_nome}** (${a.duracao_minutos} min) — ${formatMoney(Number(a.preco))} — Status: **${a.status}**`,
           );
         }
         blocos.push('');
@@ -313,7 +313,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       blocos.push(`🛠️ **Serviços / Procedimentos Disponíveis (${servicos.length}):**`);
       for (const s of servicos.slice(0, 8)) {
         blocos.push(
-          `• **${s.nome}** — ⏱️ Duração: **${s.duracao_minutos} min** — **R$ ${formatMoney(Number(s.preco))}**${
+          `• **${s.nome}** — ⏱️ Duração: **${s.duracao_minutos} min** — **${formatMoney(Number(s.preco))}**${
             s.descricao ? `\n  _${s.descricao}_` : ''
           }`,
         );
@@ -418,7 +418,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       if (encontradosProd.length > 0) {
         const lista = encontradosProd.slice(0, 6).map(
           (pr) =>
-            `• **${pr.nome}** — **R$ ${formatMoney(Number(pr.preco_venda))}** *(Disponível: ${formatQty(Number(pr.estoque_atual))} ${pr.unidade || 'UN'})*${
+            `• **${pr.nome}** — **${formatMoney(Number(pr.preco_venda))}** *(Disponível: ${formatQty(Number(pr.estoque_atual))} ${pr.unidade || 'UN'})*${
               pr.descricao ? `\n  _${pr.descricao.slice(0, 90)}_` : ''
             }`,
         );
@@ -431,7 +431,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       if (encontradosServ.length > 0) {
         const listaS = encontradosServ.slice(0, 5).map(
           (s) =>
-            `• **${s.nome}** — ⏱️ **${s.duracao_minutos} min** — **R$ ${formatMoney(Number(s.preco))}**${
+            `• **${s.nome}** — ⏱️ **${s.duracao_minutos} min** — **${formatMoney(Number(s.preco))}**${
               s.descricao ? `\n  _${s.descricao.slice(0, 90)}_` : ''
             }`,
         );

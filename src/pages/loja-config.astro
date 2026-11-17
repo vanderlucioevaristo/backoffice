@@ -25,6 +25,7 @@ let emp = await db()
             COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
             agenda_datas_fechadas,
             COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem,
+            COALESCE(mostrar_frete_vitrine, 1) AS mostrar_frete_vitrine,
             COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
             COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
             nubank_chave_pix,
@@ -71,6 +72,7 @@ if (Astro.request.method === 'POST') {
   const agendaDiasSemana = diasMarcados.join(',');
   const agendaDatasFechadas = str(f, 'agenda_datas_fechadas', 1000);
   const cepOrigem = onlyDigits(str(f, 'cep_origem', 12)) || '01001000';
+  const mostrarFreteVitrine = f.get('mostrar_frete_vitrine') ? 1 : 0;
   const nubankPixAtivo = f.get('nubank_pix_ativo') ? 1 : 0;
   const nubankLinkAtivo = f.get('nubank_link_ativo') ? 1 : 0;
   const nubankChavePix = str(f, 'nubank_chave_pix', 140);
@@ -90,7 +92,7 @@ if (Astro.request.method === 'POST') {
                 rodape_horario = ?, rodape_endereco = ?, rodape_suporte = ?, rodape_instagram = ?,
                 rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
                 agenda_ativa = ?, agenda_menu_texto = ?, agenda_inicio = ?, agenda_fim = ?, agenda_intervalo_min = ?,
-                agenda_dias_semana = ?, agenda_datas_fechadas = ?, cep_origem = ?,
+                agenda_dias_semana = ?, agenda_datas_fechadas = ?, cep_origem = ?, mostrar_frete_vitrine = ?,
                 nubank_pix_ativo = ?, nubank_link_ativo = ?,
                 nubank_chave_pix = ?, nubank_cidade_pix = ?, nubank_link_padrao = ?,
                 nupay_merchant_key = ?, nupay_merchant_token = ?
@@ -123,6 +125,7 @@ if (Astro.request.method === 'POST') {
         agendaDiasSemana,
         agendaDatasFechadas || null,
         cepOrigem,
+        mostrarFreteVitrine,
         nubankPixAtivo,
         nubankLinkAtivo,
         nubankChavePix || null,
@@ -161,6 +164,7 @@ if (Astro.request.method === 'POST') {
       agenda_dias_semana: agendaDiasSemana,
       agenda_datas_fechadas: agendaDatasFechadas,
       cep_origem: cepOrigem,
+      mostrar_frete_vitrine: mostrarFreteVitrine,
       nubank_pix_ativo: nubankPixAtivo,
       nubank_link_ativo: nubankLinkAtivo,
       nubank_chave_pix: nubankChavePix,
@@ -457,9 +461,15 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             maxlength="9"
             placeholder="01001-000"
           />
-          <small class="muted" style="display:block;margin-top:4px">
-            Usado como CEP remetente no cálculo de PAC e SEDEX nos pedidos.
-          </small>
+          <label class="check" style="margin-top:8px;font-size:13px;font-weight:600;color:#0f172a">
+            <input
+              type="checkbox"
+              name="mostrar_frete_vitrine"
+              value="1"
+              checked={(emp.mostrar_frete_vitrine ?? 1) === 1}
+            />
+            Mostrar frete na apresentação do produto na loja (com base no CEP do cliente logado)
+          </label>
         </div>
 
         <div class="c3">

@@ -226,7 +226,7 @@ function formatDataBr(ymd: string): string {
                   <div class="muted" style="font-size:12px">📞 {a.cliente_celular || a.cliente_telefone}</div>
                 )}
               </td>
-              <td class="num">R$ {formatMoney(a.preco)}</td>
+              <td class="num">{formatMoney(a.preco)}</td>
               <td>
                 {a.status === 'AGENDADO' && <span class="tag warn">Agendado</span>}
                 {a.status === 'CONFIRMADO' && <span class="tag ok">Confirmado</span>}

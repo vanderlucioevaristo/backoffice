@@ -349,6 +349,7 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE produtos_fornecedores ADD COLUMN ultimo_preco REAL",
       "ALTER TABLE produtos_fornecedores ADD COLUMN ultimo_nf TEXT",
       "ALTER TABLE produtos_fornecedores ADD COLUMN data_ultima_nf TEXT",
+      "ALTER TABLE empresas ADD COLUMN mostrar_frete_vitrine INTEGER NOT NULL DEFAULT 1",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -498,6 +499,7 @@ export type LojaEmpresa = {
   agenda_dias_semana: string;
   agenda_datas_fechadas: string | null;
   cep_origem: string | null;
+  mostrar_frete_vitrine: number;
   nubank_pix_ativo: number;
   nubank_link_ativo: number;
   nubank_chave_pix: string | null;
@@ -524,6 +526,7 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
               agenda_datas_fechadas,
               COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem,
+              COALESCE(mostrar_frete_vitrine, 1) AS mostrar_frete_vitrine,
               COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
               COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
               nubank_chave_pix,

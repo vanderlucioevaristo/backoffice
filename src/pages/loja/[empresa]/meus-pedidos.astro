@@ -114,12 +114,12 @@ const baseUrl = `/loja/${empCodigo}`;
             ) : null}
             {ped.frete_modalidade && (
               <span class="muted" style="font-size:12.5px">
-                🚚 {ped.frete_modalidade}: <strong>{ped.valor_frete > 0 ? `R$ ${formatMoney(ped.valor_frete)}` : 'Grátis'}</strong>
+                🚚 {ped.frete_modalidade}: <strong>{ped.valor_frete > 0 ? formatMoney(ped.valor_frete) : 'Grátis'}</strong>
                 {ped.frete_prazo_dias ? ` (até ${ped.frete_prazo_dias}d úteis)` : ''}
               </span>
             )}
             <span class="spacer"></span>
-            <strong style="font-size:17px;color:var(--pr)">R$ {formatMoney(ped.valor_total)}</strong>
+            <strong style="font-size:17px;color:var(--pr)">{formatMoney(ped.valor_total)}</strong>
           </div>
 
           {ped.status !== 'cancelado' &&
@@ -132,7 +132,7 @@ const baseUrl = `/loja/${empCodigo}`;
                   Nubank
                 </span>
                 <strong style="color:#581c87;font-size:13.5px">
-                  Opções de pagamento para este pedido (R$ {formatMoney(ped.valor_total)}):
+                  Opções de pagamento para este pedido ({formatMoney(ped.valor_total)}):
                 </strong>
               </div>
               <div class="row" style="gap:8px;margin:0">

@@ -186,7 +186,7 @@ function formatarDuracao(min: number): string {
               <td>
                 <span class="tag ok">⏱️ {formatarDuracao(s.duracao_minutos)}</span>
               </td>
-              <td class="num">R$ {formatMoney(s.preco)}</td>
+              <td class="num">{formatMoney(s.preco)}</td>
               <td>
                 {s.ativo === 1 ? (
                   <span class="tag ok">Ativo</span>

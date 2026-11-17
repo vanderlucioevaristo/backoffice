@@ -16,7 +16,7 @@ if (!empresa) return new Response('Loja não encontrada.', { status: 404 });
 
 const token = Astro.cookies.get(CLIENT_SESSION_COOKIE)?.value;
 if (token && (await getSessionClient(token, empCodigo))) {
-  return Astro.redirect(`/loja/${empCodigo}`);
+  return Astro.redirect(`/loja/${empCodigo}/meu-cadastro`);
 }
 
 let erro = '';

@@ -352,7 +352,7 @@ function formatDataBr(ymd: string): string {
                 <select id="sel-servico" name="servico_id" required>
                   {servicos.map((s) => (
                     <option value={s.id} data-duracao={s.duracao_minutos} data-preco={s.preco}>
-                      {s.nome} — ⏱️ {s.duracao_minutos} min — R$ {formatMoney(s.preco)}
+                      {s.nome} — ⏱️ {s.duracao_minutos} min — {formatMoney(s.preco)}
                     </option>
                   ))}
                 </select>
@@ -490,7 +490,7 @@ function formatDataBr(ymd: string): string {
                     {m.observacoes && <div class="muted" style="font-size:12px">Obs: {m.observacoes}</div>}
                   </td>
                   <td>{m.duracao_minutos} min</td>
-                  <td class="num">R$ {formatMoney(m.preco)}</td>
+                  <td class="num">{formatMoney(m.preco)}</td>
                   <td>
                     {m.status === 'AGENDADO' && <span class="tag warn">Agendado</span>}
                     {m.status === 'CONFIRMADO' && <span class="tag ok">Confirmado</span>}

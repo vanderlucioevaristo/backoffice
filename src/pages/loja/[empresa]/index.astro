@@ -1,7 +1,8 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
-import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, parseNum } from '../../../lib/validate';
+import { calcularFreteCorreios } from '../../../lib/empresa-service';
+import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, onlyDigits, parseNum } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
 const empresa = await getLojaEmpresa(empCodigo);
@@ -95,12 +96,68 @@ if (q) {
 
 const agora = nowLocalIso();
 
+// Busca o CEP do cliente logado para cálculo individual do frete na vitrine
+const rowClienteCep = await db()
+  .prepare('SELECT cep FROM parceiros WHERE id = ? AND empresa_id = ?')
+  .bind(cliente.id, empresa.id)
+  .first<{ cep: string | null }>();
+const cepClienteLimpo = onlyDigits(rowClienteCep?.cep ?? '');
+const exibirFreteVitrine = (empresa.mostrar_frete_vitrine ?? 1) === 1;
+
+function calcularResumoFreteProduto(
+  item: {
+    peso_kg?: number | null;
+    comprimento_cm?: number | null;
+    largura_cm?: number | null;
+    altura_cm?: number | null;
+  },
+  precoUnit: number,
+): { curto: string; detalhado: string } {
+  if (!exibirFreteVitrine) return { curto: '', detalhado: '' };
+  if (!/^\d{8}$/.test(cepClienteLimpo)) {
+    return {
+      curto: '🚚 Frete calculado no carrinho',
+      detalhado: '🚚 Informe seu CEP no carrinho para calcular PAC e SEDEX',
+    };
+  }
+  const cot = calcularFreteCorreios({
+    cepOrigem: empresa.cep_origem || '01001000',
+    cepDestino: cepClienteLimpo,
+    itens: [
+      {
+        quantidade: 1,
+        pesoKg: item.peso_kg ?? 0.3,
+        comprimentoCm: item.comprimento_cm ?? 16,
+        larguraCm: item.largura_cm ?? 11,
+        alturaCm: item.altura_cm ?? 5,
+        precoUnitario: precoUnit,
+      },
+    ],
+  });
+  if (!cot.ok) return { curto: '', detalhado: '' };
+  const pac = cot.opcoes.find((o) => o.codigo === 'PAC');
+  const sedex = cot.opcoes.find((o) => o.codigo === 'SEDEX');
+  const cepFmt = cepClienteLimpo.replace(/^(\d{5})(\d{3})$/, '$1-$2');
+  return {
+    curto: pac
+      ? `🚚 Frete PAC: ${formatMoney(pac.valor)} (${pac.prazoDias}d)${sedex ? ` · SEDEX: ${formatMoney(sedex.valor)}` : ''}`
+      : '',
+    detalhado: pac
+      ? `🚚 Frete p/ seu CEP (${cepFmt}): PAC ${formatMoney(pac.valor)} (${pac.prazoDias}d úteis)${sedex ? ` · SEDEX ${formatMoney(sedex.valor)} (${sedex.prazoDias}d úteis)` : ''}`
+      : '',
+  };
+}
+
 // Ofertas ativas e dentro do período de vigência para o carrossel da loja (somente produtos com estoque >= 1)
 const { results: ofertas } = await db()
   .prepare(
     `SELECT o.id AS oferta_id, o.titulo_oferta, o.preco_oferta, o.inicio_em, o.fim_em,
-            p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.unidade,
-            p.preco_venda, p.estoque_atual, p.foto
+            p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.cor, p.unidade,
+            p.preco_venda, p.estoque_atual, p.foto,
+            COALESCE(p.peso_kg, 0.3) AS peso_kg,
+            COALESCE(p.comprimento_cm, 16) AS comprimento_cm,
+            COALESCE(p.largura_cm, 11) AS largura_cm,
+            COALESCE(p.altura_cm, 5) AS altura_cm
        FROM loja_ofertas o
        JOIN produtos p ON p.id = o.produto_id AND p.empresa_id = o.empresa_id
       WHERE o.empresa_id = ?
@@ -124,16 +181,25 @@ const { results: ofertas } = await db()
     descricao: string | null;
     categoria: string | null;
     marca: string | null;
+    cor: string | null;
     unidade: string;
     preco_venda: number;
     estoque_atual: number;
     foto: string | null;
+    peso_kg: number;
+    comprimento_cm: number;
+    largura_cm: number;
+    altura_cm: number;
   }>();
 
 const { results: produtos } = await db()
   .prepare(
-    `SELECT p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.unidade,
+    `SELECT p.id, p.codigo, p.nome, p.descricao, p.categoria, p.marca, p.cor, p.unidade,
             p.preco_venda, p.estoque_atual, p.foto,
+            COALESCE(p.peso_kg, 0.3) AS peso_kg,
+            COALESCE(p.comprimento_cm, 16) AS comprimento_cm,
+            COALESCE(p.largura_cm, 11) AS largura_cm,
+            COALESCE(p.altura_cm, 5) AS altura_cm,
             o.preco_oferta, o.titulo_oferta
        FROM produtos p
        LEFT JOIN loja_ofertas o
@@ -153,10 +219,15 @@ const { results: produtos } = await db()
     descricao: string | null;
     categoria: string | null;
     marca: string | null;
+    cor: string | null;
     unidade: string;
     preco_venda: number;
     estoque_atual: number;
     foto: string | null;
+    peso_kg: number;
+    comprimento_cm: number;
+    largura_cm: number;
+    altura_cm: number;
     preco_oferta: number | null;
     titulo_oferta: string | null;
   }>();
@@ -217,6 +288,7 @@ const baseUrl = `/loja/${empCodigo}`;
           const percOff = temDesconto
             ? Math.round(((of.preco_venda - of.preco_oferta) / of.preco_venda) * 100)
             : 0;
+          const freteOf = calcularResumoFreteProduto(of, of.preco_oferta);
           return (
             <div
               class="oferta-slide prod-mini"
@@ -226,12 +298,13 @@ const baseUrl = `/loja/${empCodigo}`;
               data-codigo={of.codigo || ''}
               data-nome={of.nome}
               data-desc={of.descricao || ''}
-              data-cat={[of.categoria || 'Geral', of.marca].filter(Boolean).join(' · ')}
+              data-cat={[of.categoria || 'Geral', of.marca, of.cor ? `Cor: ${of.cor}` : ''].filter(Boolean).join(' · ')}
               data-preco={formatMoney(of.preco_oferta)}
               data-preco-antigo={temDesconto ? formatMoney(of.preco_venda) : ''}
               data-selo={of.titulo_oferta || 'OFERTA'}
               data-est={of.estoque_atual}
               data-est-fmt={`${formatQty(of.estoque_atual)} ${of.unidade}`}
+              data-frete={freteOf.detalhado}
               data-foto={of.foto || ''}
               title="Clique para abrir a oferta e colocar no carrinho"
             >
@@ -252,6 +325,11 @@ const baseUrl = `/loja/${empCodigo}`;
                 <div class="ml-stock-badge" style="margin-top:2px">
                   Quantidade disponível: {formatQty(of.estoque_atual)} {of.unidade}
                 </div>
+                {freteOf.curto && (
+                  <div class="muted" style="font-size:10.5px;margin-top:2px;line-height:1.25;color:#475569">
+                    {freteOf.curto}
+                  </div>
+                )}
               </div>
 
               <div class="ml-title" style="font-weight:500">{of.nome}</div>
@@ -298,6 +376,7 @@ const baseUrl = `/loja/${empCodigo}`;
       {produtos.map((p) => {
         const precoFinal = p.preco_oferta !== null && p.preco_oferta !== undefined ? p.preco_oferta : p.preco_venda;
         const temDesc = p.preco_oferta !== null && p.preco_oferta !== undefined && p.preco_oferta < p.preco_venda;
+        const freteProd = calcularResumoFreteProduto(p, precoFinal);
         return (
           <div
             class="ml-card prod-mini"
@@ -307,12 +386,13 @@ const baseUrl = `/loja/${empCodigo}`;
             data-codigo={p.codigo || ''}
             data-nome={p.nome}
             data-desc={p.descricao || ''}
-            data-cat={[p.categoria || 'Geral', p.marca].filter(Boolean).join(' · ')}
+            data-cat={[p.categoria || 'Geral', p.marca, p.cor ? `Cor: ${p.cor}` : ''].filter(Boolean).join(' · ')}
             data-preco={formatMoney(precoFinal)}
             data-preco-antigo={temDesc ? formatMoney(p.preco_venda) : ''}
             data-selo={p.titulo_oferta || ''}
             data-est={p.estoque_atual}
             data-est-fmt={`${formatQty(p.estoque_atual)} ${p.unidade}`}
+            data-frete={freteProd.detalhado}
             data-foto={p.foto || ''}
             title="Clique para expandir e adicionar ao carrinho"
           >
@@ -329,6 +409,11 @@ const baseUrl = `/loja/${empCodigo}`;
               <div class="ml-stock-badge">
                 Quantidade disponível: {formatQty(p.estoque_atual)} {p.unidade}
               </div>
+              {freteProd.curto && (
+                <div class="muted" style="font-size:11px;margin-top:2px;line-height:1.25;color:#475569">
+                  {freteProd.curto}
+                </div>
+              )}
               <div class="ml-title">{p.nome}</div>
             </div>
           </div>
@@ -356,6 +441,7 @@ const baseUrl = `/loja/${empCodigo}`;
           <div style="font-size:12.5px;margin-top:4px;color:#00a650;font-weight:600">
             ✓ Quantidade disponível: <span id="m-est"></span>
           </div>
+          <div id="m-frete" class="muted" style="font-size:11.5px;margin-top:4px;color:#475569;display:none"></div>
         </div>
       </div>
 
@@ -386,6 +472,7 @@ const baseUrl = `/loja/${empCodigo}`;
   const mPrecoAntigo = document.getElementById('m-preco-antigo');
   const mPreco = document.getElementById('m-preco');
   const mEst = document.getElementById('m-est');
+  const mFrete = document.getElementById('m-frete');
   const mDesc = document.getElementById('m-desc');
   const mQtd = document.getElementById('m-qtd');
 
@@ -404,6 +491,14 @@ const baseUrl = `/loja/${empCodigo}`;
     }
     mPreco.textContent = d.preco;
     mEst.textContent = d.estFmt;
+    if (mFrete) {
+      if (d.frete) {
+        mFrete.textContent = d.frete;
+        mFrete.style.display = 'block';
+      } else {
+        mFrete.style.display = 'none';
+      }
+    }
     if (d.desc) {
       mDesc.textContent = d.desc;
       mDesc.style.display = 'block';

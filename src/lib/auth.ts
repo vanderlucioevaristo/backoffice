@@ -350,6 +350,8 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE produtos_fornecedores ADD COLUMN ultimo_nf TEXT",
       "ALTER TABLE produtos_fornecedores ADD COLUMN data_ultima_nf TEXT",
       "ALTER TABLE empresas ADD COLUMN mostrar_frete_vitrine INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE empresas ADD COLUMN frete_provedor TEXT NOT NULL DEFAULT 'CORREIOS'",
+      "ALTER TABLE empresas ADD COLUMN cepcerto_public_key TEXT NOT NULL DEFAULT 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459'",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -500,6 +502,8 @@ export type LojaEmpresa = {
   agenda_datas_fechadas: string | null;
   cep_origem: string | null;
   mostrar_frete_vitrine: number;
+  frete_provedor: 'CORREIOS' | 'CEPCERTO';
+  cepcerto_public_key: string;
   nubank_pix_ativo: number;
   nubank_link_ativo: number;
   nubank_chave_pix: string | null;
@@ -526,7 +530,9 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               COALESCE(agenda_dias_semana, '1,2,3,4,5') AS agenda_dias_semana,
               agenda_datas_fechadas,
               COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem,
-              COALESCE(mostrar_frete_vitrine, 1) AS mostrar_frete_vitrine,
+              CASE WHEN COALESCE(frete_provedor, 'CORREIOS') = 'CEPCERTO' THEN 0 ELSE COALESCE(mostrar_frete_vitrine, 1) END AS mostrar_frete_vitrine,
+              COALESCE(NULLIF(frete_provedor, ''), 'CORREIOS') AS frete_provedor,
+              COALESCE(NULLIF(cepcerto_public_key, ''), 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459') AS cepcerto_public_key,
               COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
               COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
               nubank_chave_pix,

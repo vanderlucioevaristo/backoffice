@@ -26,6 +26,8 @@ let emp = await db()
             agenda_datas_fechadas,
             COALESCE(NULLIF(cep_origem, ''), '01001000') AS cep_origem,
             COALESCE(mostrar_frete_vitrine, 1) AS mostrar_frete_vitrine,
+            COALESCE(NULLIF(frete_provedor, ''), 'CORREIOS') AS frete_provedor,
+            COALESCE(NULLIF(cepcerto_public_key, ''), 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459') AS cepcerto_public_key,
             COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
             COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
             nubank_chave_pix,
@@ -72,7 +74,11 @@ if (Astro.request.method === 'POST') {
   const agendaDiasSemana = diasMarcados.join(',');
   const agendaDatasFechadas = str(f, 'agenda_datas_fechadas', 1000);
   const cepOrigem = onlyDigits(str(f, 'cep_origem', 12)) || '01001000';
-  const mostrarFreteVitrine = f.get('mostrar_frete_vitrine') ? 1 : 0;
+  const freteProvedor = f.get('frete_provedor') === 'CEPCERTO' ? 'CEPCERTO' : 'CORREIOS';
+  const cepcertoPublicKey =
+    str(f, 'cepcerto_public_key', 160) || 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459';
+  // Se o CEP Certo estiver habilitado, desabilita automaticamente o frete na apresentação do produto na vitrine
+  const mostrarFreteVitrine = freteProvedor === 'CEPCERTO' ? 0 : f.get('mostrar_frete_vitrine') ? 1 : 0;
   const nubankPixAtivo = f.get('nubank_pix_ativo') ? 1 : 0;
   const nubankLinkAtivo = f.get('nubank_link_ativo') ? 1 : 0;
   const nubankChavePix = str(f, 'nubank_chave_pix', 140);
@@ -93,6 +99,7 @@ if (Astro.request.method === 'POST') {
                 rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
                 agenda_ativa = ?, agenda_menu_texto = ?, agenda_inicio = ?, agenda_fim = ?, agenda_intervalo_min = ?,
                 agenda_dias_semana = ?, agenda_datas_fechadas = ?, cep_origem = ?, mostrar_frete_vitrine = ?,
+                frete_provedor = ?, cepcerto_public_key = ?,
                 nubank_pix_ativo = ?, nubank_link_ativo = ?,
                 nubank_chave_pix = ?, nubank_cidade_pix = ?, nubank_link_padrao = ?,
                 nupay_merchant_key = ?, nupay_merchant_token = ?
@@ -126,6 +133,8 @@ if (Astro.request.method === 'POST') {
         agendaDatasFechadas || null,
         cepOrigem,
         mostrarFreteVitrine,
+        freteProvedor,
+        cepcertoPublicKey,
         nubankPixAtivo,
         nubankLinkAtivo,
         nubankChavePix || null,
@@ -165,6 +174,8 @@ if (Astro.request.method === 'POST') {
       agenda_datas_fechadas: agendaDatasFechadas,
       cep_origem: cepOrigem,
       mostrar_frete_vitrine: mostrarFreteVitrine,
+      frete_provedor: freteProvedor,
+      cepcerto_public_key: cepcertoPublicKey,
       nubank_pix_ativo: nubankPixAtivo,
       nubank_link_ativo: nubankLinkAtivo,
       nubank_chave_pix: nubankChavePix,
@@ -307,6 +318,65 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
       </div>
     </div>
 
+    <div class="card" style="border-left:4px solid #0284c7">
+      <h2 style="color:#0369a1">🚚 Cálculo de Frete na Loja (Correios ou CEP Certo Multi-Fornecedor)</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Escolha se a loja deve usar o cálculo interno <strong>somente com os Correios (PAC e SEDEX)</strong> ou a integração com o widget <strong>CEP Certo</strong> (cálculo em vários fornecedores/transportadoras). Quando o <strong>CEP Certo</strong> é habilitado, a exibição de frete na vitrine de produtos é desabilitada automaticamente.
+      </p>
+      <div class="grid">
+        <div class="c5">
+          <label>Motor de Cálculo de Frete na Loja</label>
+          <select name="frete_provedor" id="sel-frete-provedor">
+            <option value="CORREIOS" selected={(emp.frete_provedor || 'CORREIOS') === 'CORREIOS'}>
+              📦 Somente Correios (PAC e SEDEX integrado)
+            </option>
+            <option value="CEPCERTO" selected={emp.frete_provedor === 'CEPCERTO'}>
+              🚚 Integração CEP Certo (Vários fornecedores / transportadoras)
+            </option>
+          </select>
+        </div>
+        <div class="c3">
+          <label>CEP de origem da Loja (Correios)</label>
+          <input
+            name="cep_origem"
+            value={emp.cep_origem || '01001000'}
+            maxlength="9"
+            placeholder="01001-000"
+          />
+        </div>
+        <div class="c4">
+          <label>Chave Pública CEP Certo (<code>data-public-key</code>)</label>
+          <input
+            name="cepcerto_public_key"
+            value={emp.cepcerto_public_key || 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459'}
+            placeholder="pk_live_..."
+          />
+        </div>
+
+        <div class="c12">
+          <label
+            class="check"
+            id="lbl-frete-vitrine"
+            style={`font-size:13.5px;font-weight:600;padding:10px 12px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc;${emp.frete_provedor === 'CEPCERTO' ? 'opacity:0.55;cursor:not-allowed' : ''}`}
+          >
+            <input
+              type="checkbox"
+              name="mostrar_frete_vitrine"
+              id="chk-frete-vitrine"
+              value="1"
+              checked={emp.frete_provedor !== 'CEPCERTO' && (emp.mostrar_frete_vitrine ?? 1) === 1}
+              disabled={emp.frete_provedor === 'CEPCERTO'}
+            />
+            <span id="txt-frete-vitrine">
+              {emp.frete_provedor === 'CEPCERTO'
+                ? 'Mostrar frete na apresentação do produto na loja (Desabilitado automaticamente porque o CEP Certo está ativo)'
+                : 'Mostrar frete na apresentação do produto na loja (calculado com base no CEP do cliente logado)'}
+            </span>
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="card" style="border-left:4px solid #820ad1">
       <h2 style="color:#820ad1">💜 Pagamento Nubank (Pix Automático, Link de Cobrança e NuPay)</h2>
       <p class="muted" style="margin-top:0;font-size:13px">
@@ -444,7 +514,7 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           >{emp.rodape_suporte ?? ''}</textarea>
         </div>
 
-        <div class="c8">
+        <div class="c12">
           <label>Endereço físico / Localização da loja</label>
           <textarea
             name="rodape_endereco"
@@ -452,24 +522,6 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             rows="2"
             placeholder="Ex: Av. Paulista, 1000 - Bela Vista, São Paulo/SP - CEP 01310-100"
           >{emp.rodape_endereco ?? ''}</textarea>
-        </div>
-        <div class="c4">
-          <label>🚚 CEP de origem para cálculo de frete (Correios)</label>
-          <input
-            name="cep_origem"
-            value={emp.cep_origem || '01001000'}
-            maxlength="9"
-            placeholder="01001-000"
-          />
-          <label class="check" style="margin-top:8px;font-size:13px;font-weight:600;color:#0f172a">
-            <input
-              type="checkbox"
-              name="mostrar_frete_vitrine"
-              value="1"
-              checked={(emp.mostrar_frete_vitrine ?? 1) === 1}
-            />
-            Mostrar frete na apresentação do produto na loja (com base no CEP do cliente logado)
-          </label>
         </div>
 
         <div class="c3">
@@ -622,6 +674,31 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
     inpLogo, inpNome, inpCp, inpCs, inpCf, inpCt,
     inpRtel, inpRwhats, inpRemail, inpRhor, inpRsobre, inpRsup, inpRend, inpRcf, inpRct,
   ].forEach((el) => el && el.addEventListener('input', syncPreview));
+
+  // Quando o provedor de frete muda para CEP Certo, desabilita automaticamente o frete na apresentação do produto
+  const selFreteProv = document.getElementById('sel-frete-provedor');
+  const chkFreteVit = document.getElementById('chk-frete-vitrine');
+  const lblFreteVit = document.getElementById('lbl-frete-vitrine');
+  const txtFreteVit = document.getElementById('txt-frete-vitrine');
+  if (selFreteProv && chkFreteVit && lblFreteVit && txtFreteVit) {
+    selFreteProv.addEventListener('change', () => {
+      const isCepCerto = selFreteProv.value === 'CEPCERTO';
+      if (isCepCerto) {
+        chkFreteVit.checked = false;
+        chkFreteVit.disabled = true;
+        lblFreteVit.style.opacity = '0.55';
+        lblFreteVit.style.cursor = 'not-allowed';
+        txtFreteVit.textContent =
+          'Mostrar frete na apresentação do produto na loja (Desabilitado automaticamente porque o CEP Certo está ativo)';
+      } else {
+        chkFreteVit.disabled = false;
+        lblFreteVit.style.opacity = '1';
+        lblFreteVit.style.cursor = 'pointer';
+        txtFreteVit.textContent =
+          'Mostrar frete na apresentação do produto na loja (calculado com base no CEP do cliente logado)';
+      }
+    });
+  }
 
   // Converte imagem selecionada para Data-URL compactada (até 320px de largura) para salvar direto no banco
   inpFile.addEventListener('change', () => {

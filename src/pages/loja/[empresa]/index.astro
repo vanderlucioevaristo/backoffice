@@ -102,7 +102,8 @@ const rowClienteCep = await db()
   .bind(cliente.id, empresa.id)
   .first<{ cep: string | null }>();
 const cepClienteLimpo = onlyDigits(rowClienteCep?.cep ?? '');
-const exibirFreteVitrine = (empresa.mostrar_frete_vitrine ?? 1) === 1;
+const exibirFreteVitrine =
+  empresa.frete_provedor !== 'CEPCERTO' && (empresa.mostrar_frete_vitrine ?? 1) === 1;
 
 function calcularResumoFreteProduto(
   item: {

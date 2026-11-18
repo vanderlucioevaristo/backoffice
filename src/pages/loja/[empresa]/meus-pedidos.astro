@@ -21,7 +21,7 @@ Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
   secure: import.meta.env.PROD,
   sameSite: 'lax',
   path: '/',
-  maxAge: IDLE_TIMEOUT_SEC,
+  maxAge: cliente.tempoSessaoSegundos || IDLE_TIMEOUT_SEC,
 });
 
 const { results: pedidos } = await db()

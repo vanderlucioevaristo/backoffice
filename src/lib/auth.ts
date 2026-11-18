@@ -352,6 +352,7 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN mostrar_frete_vitrine INTEGER NOT NULL DEFAULT 1",
       "ALTER TABLE empresas ADD COLUMN frete_provedor TEXT NOT NULL DEFAULT 'CORREIOS'",
       "ALTER TABLE empresas ADD COLUMN cepcerto_public_key TEXT NOT NULL DEFAULT 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459'",
+      "ALTER TABLE empresas ADD COLUMN tempo_sessao_minutos INTEGER NOT NULL DEFAULT 10",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -437,6 +438,7 @@ export type SessionUser = {
   empresaId: number;
   empresaNome: string;
   empresaCodigo: string;
+  tempoSessaoSegundos?: number;
 };
 
 export async function getSessionUser(token: string): Promise<SessionUser | null> {
@@ -456,6 +458,7 @@ export type SessionClient = {
   email: string | null;
   empresaId: number;
   empresaCodigo: string;
+  tempoSessaoSegundos?: number;
 };
 
 export async function createClientSession(parceiroId: number, empresaId: number) {
@@ -504,6 +507,7 @@ export type LojaEmpresa = {
   mostrar_frete_vitrine: number;
   frete_provedor: 'CORREIOS' | 'CEPCERTO';
   cepcerto_public_key: string;
+  tempo_sessao_minutos: number;
   nubank_pix_ativo: number;
   nubank_link_ativo: number;
   nubank_chave_pix: string | null;
@@ -533,6 +537,7 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               CASE WHEN COALESCE(frete_provedor, 'CORREIOS') = 'CEPCERTO' THEN 0 ELSE COALESCE(mostrar_frete_vitrine, 1) END AS mostrar_frete_vitrine,
               COALESCE(NULLIF(frete_provedor, ''), 'CORREIOS') AS frete_provedor,
               COALESCE(NULLIF(cepcerto_public_key, ''), 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459') AS cepcerto_public_key,
+              COALESCE(tempo_sessao_minutos, 10) AS tempo_sessao_minutos,
               COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
               COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
               nubank_chave_pix,

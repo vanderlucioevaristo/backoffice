@@ -50,7 +50,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     secure: import.meta.env.PROD,
     sameSite: 'lax',
     path: '/',
-    maxAge: IDLE_TIMEOUT_SEC,
+    maxAge: cliente.tempoSessaoSegundos || IDLE_TIMEOUT_SEC,
   });
 
   // Carrega os pedidos do cliente autenticado (se estiver logado)

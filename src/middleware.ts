@@ -19,13 +19,13 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   ctx.locals.user = user;
 
   if (user && token) {
-    // Renova o cookie por mais 5 minutos a cada requisição ativa
+    // Renova o cookie pelo tempo de inatividade configurado na empresa
     ctx.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       secure: import.meta.env.PROD,
       sameSite: 'lax',
       path: '/',
-      maxAge: IDLE_TIMEOUT_SEC,
+      maxAge: user.tempoSessaoSegundos || IDLE_TIMEOUT_SEC,
     });
   }
 

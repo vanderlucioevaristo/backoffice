@@ -21,7 +21,7 @@ if (token && (await getSessionClient(token, empCodigo))) {
 }
 
 let erro = Astro.url.searchParams.get('expirado') === '1'
-  ? 'Sua conexão foi encerrada por permanecer mais de 5 minutos sem atividade.'
+  ? `Sua conexão foi encerrada por permanecer mais de ${empresa.tempo_sessao_minutos || 10} minuto(s) sem atividade.`
   : '';
 let ident = '';
 

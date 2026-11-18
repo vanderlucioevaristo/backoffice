@@ -28,6 +28,7 @@ let emp = await db()
             COALESCE(mostrar_frete_vitrine, 1) AS mostrar_frete_vitrine,
             COALESCE(NULLIF(frete_provedor, ''), 'CORREIOS') AS frete_provedor,
             COALESCE(NULLIF(cepcerto_public_key, ''), 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459') AS cepcerto_public_key,
+            COALESCE(tempo_sessao_minutos, 10) AS tempo_sessao_minutos,
             COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
             COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
             nubank_chave_pix,
@@ -77,6 +78,7 @@ if (Astro.request.method === 'POST') {
   const freteProvedor = f.get('frete_provedor') === 'CEPCERTO' ? 'CEPCERTO' : 'CORREIOS';
   const cepcertoPublicKey =
     str(f, 'cepcerto_public_key', 160) || 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459';
+  const tempoSessaoMinutos = Math.max(1, Math.min(1440, Math.round(Number(f.get('tempo_sessao_minutos')) || 10)));
   // Se o CEP Certo estiver habilitado, desabilita automaticamente o frete na apresentação do produto na vitrine
   const mostrarFreteVitrine = freteProvedor === 'CEPCERTO' ? 0 : f.get('mostrar_frete_vitrine') ? 1 : 0;
   const nubankPixAtivo = f.get('nubank_pix_ativo') ? 1 : 0;
@@ -99,7 +101,7 @@ if (Astro.request.method === 'POST') {
                 rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
                 agenda_ativa = ?, agenda_menu_texto = ?, agenda_inicio = ?, agenda_fim = ?, agenda_intervalo_min = ?,
                 agenda_dias_semana = ?, agenda_datas_fechadas = ?, cep_origem = ?, mostrar_frete_vitrine = ?,
-                frete_provedor = ?, cepcerto_public_key = ?,
+                frete_provedor = ?, cepcerto_public_key = ?, tempo_sessao_minutos = ?,
                 nubank_pix_ativo = ?, nubank_link_ativo = ?,
                 nubank_chave_pix = ?, nubank_cidade_pix = ?, nubank_link_padrao = ?,
                 nupay_merchant_key = ?, nupay_merchant_token = ?
@@ -135,6 +137,7 @@ if (Astro.request.method === 'POST') {
         mostrarFreteVitrine,
         freteProvedor,
         cepcertoPublicKey,
+        tempoSessaoMinutos,
         nubankPixAtivo,
         nubankLinkAtivo,
         nubankChavePix || null,
@@ -176,6 +179,7 @@ if (Astro.request.method === 'POST') {
       mostrar_frete_vitrine: mostrarFreteVitrine,
       frete_provedor: freteProvedor,
       cepcerto_public_key: cepcertoPublicKey,
+      tempo_sessao_minutos: tempoSessaoMinutos,
       nubank_pix_ativo: nubankPixAtivo,
       nubank_link_ativo: nubankLinkAtivo,
       nubank_chave_pix: nubankChavePix,
@@ -226,6 +230,21 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             <label class="check"><input type="checkbox" name="remover_logo" value="1" /> Remover logo atual</label>
           </div>
         )}
+        <div class="c4">
+          <label>⏱️ Tempo de queda do login por inatividade (minutos)</label>
+          <input
+            type="number"
+            name="tempo_sessao_minutos"
+            min="1"
+            max="1440"
+            step="1"
+            value={emp.tempo_sessao_minutos ?? 10}
+            required
+          />
+          <small class="muted" style="display:block;margin-top:4px">
+            Tempo sem interação (em minutos) até desconectar automaticamente o login na loja e no backoffice.
+          </small>
+        </div>
       </div>
     </div>
 

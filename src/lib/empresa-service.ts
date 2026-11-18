@@ -198,19 +198,39 @@ export async function atualizarCadastroEmpresa(
   return { ok: true };
 }
 
+export async function obterTempoSessaoSegundosEmpresa(
+  database: any,
+  empresaId: number,
+): Promise<number> {
+  try {
+    const r = await database
+      .prepare('SELECT tempo_sessao_minutos FROM empresas WHERE id = ?')
+      .bind(empresaId)
+      .first();
+    const min = Number(r?.tempo_sessao_minutos);
+    if (Number.isFinite(min) && min >= 1 && min <= 1440) {
+      return Math.round(min * 60);
+    }
+  } catch {
+    // Caso a coluna ainda não exista em um banco temporário de teste, usa o padrão
+  }
+  return IDLE_TIMEOUT_SEC;
+}
+
 export async function criarSessaoUsuario(
   database: any,
   usuarioId: number,
   empresaId: number,
   nowMs = Date.now(),
 ) {
+  const timeoutSec = await obterTempoSessaoSegundosEmpresa(database, empresaId);
   const token = toHex(crypto.getRandomValues(new Uint8Array(32)));
-  const expira = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  const expira = new Date(nowMs + timeoutSec * 1000).toISOString();
   await database
     .prepare('INSERT INTO sessoes (token_hash, usuario_id, empresa_id, expira_em) VALUES (?, ?, ?, ?)')
     .bind(await sha256Hex(token), usuarioId, empresaId, expira)
     .run();
-  return { token, maxAge: IDLE_TIMEOUT_SEC };
+  return { token, maxAge: timeoutSec };
 }
 
 export async function validarERenovarSessaoUsuario(
@@ -234,19 +254,19 @@ export async function validarERenovarSessaoUsuario(
     .first();
 
   if (!row) {
-    // Remove sessão vencida (> 5 minutos de inatividade)
+    // Remove sessão vencida
     await database.prepare('DELETE FROM sessoes WHERE token_hash = ?').bind(hash).run();
     return null;
   }
 
-  // Renova o prazo de inatividade por mais 5 minutos a partir desta atividade
-  const novaExpiracao = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  const timeoutSec = await obterTempoSessaoSegundosEmpresa(database, row.empresaId);
+  const novaExpiracao = new Date(nowMs + timeoutSec * 1000).toISOString();
   await database
     .prepare('UPDATE sessoes SET expira_em = ? WHERE token_hash = ?')
     .bind(novaExpiracao, hash)
     .run();
 
-  return row;
+  return { ...row, tempoSessaoSegundos: timeoutSec };
 }
 
 export async function criarSessaoClienteLoja(
@@ -255,13 +275,14 @@ export async function criarSessaoClienteLoja(
   empresaId: number,
   nowMs = Date.now(),
 ) {
+  const timeoutSec = await obterTempoSessaoSegundosEmpresa(database, empresaId);
   const token = toHex(crypto.getRandomValues(new Uint8Array(32)));
-  const expira = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  const expira = new Date(nowMs + timeoutSec * 1000).toISOString();
   await database
     .prepare('INSERT INTO sessoes_clientes (token_hash, parceiro_id, empresa_id, expira_em) VALUES (?, ?, ?, ?)')
     .bind(await sha256Hex(token), parceiroId, empresaId, expira)
     .run();
-  return { token, maxAge: IDLE_TIMEOUT_SEC };
+  return { token, maxAge: timeoutSec };
 }
 
 export async function validarERenovarSessaoClienteLoja(
@@ -284,19 +305,19 @@ export async function validarERenovarSessaoClienteLoja(
     .first();
 
   if (!row) {
-    // Remove sessão vencida do cliente na loja (> 5 minutos de inatividade)
+    // Remove sessão vencida do cliente na loja
     await database.prepare('DELETE FROM sessoes_clientes WHERE token_hash = ?').bind(hash).run();
     return null;
   }
 
-  // Renova por mais 5 minutos a sessão ativa do cliente na loja
-  const novaExpiracao = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
+  const timeoutSec = await obterTempoSessaoSegundosEmpresa(database, row.empresaId);
+  const novaExpiracao = new Date(nowMs + timeoutSec * 1000).toISOString();
   await database
     .prepare('UPDATE sessoes_clientes SET expira_em = ? WHERE token_hash = ?')
     .bind(novaExpiracao, hash)
     .run();
 
-  return row;
+  return { ...row, tempoSessaoSegundos: timeoutSec };
 }
 
 export function horaParaMinutos(hhmm: string): number {

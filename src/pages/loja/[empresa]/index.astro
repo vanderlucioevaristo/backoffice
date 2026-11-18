@@ -22,7 +22,7 @@ Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
   secure: import.meta.env.PROD,
   sameSite: 'lax',
   path: '/',
-  maxAge: IDLE_TIMEOUT_SEC,
+  maxAge: cliente.tempoSessaoSegundos || IDLE_TIMEOUT_SEC,
 });
 
 let msgOk = '';
@@ -341,7 +341,7 @@ const baseUrl = `/loja/${empCodigo}`;
               )}
 
               <div class="oferta-cta">
-                <span>Comprar oferta</span>
+                <span>Aproveitar oferta</span>
                 <span style="display:inline-flex;align-items:center;gap:3px;color:#000">
                   <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:#000;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round" aria-hidden="true">
                     <circle cx="9" cy="21" r="1.5" fill="#000" />

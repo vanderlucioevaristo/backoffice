@@ -910,7 +910,14 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       }
     </style>
   </head>
-  <body data-sair-url={!bare && cliente ? `${baseUrl}/sair?expirado=1` : ''} data-idle-ms={IDLE_TIMEOUT_MS}>
+  <body
+    data-sair-url={!bare && cliente ? `${baseUrl}/sair?expirado=1` : ''}
+    data-idle-ms={
+      Number(empresa.tempo_sessao_minutos) > 0
+        ? Number(empresa.tempo_sessao_minutos) * 60 * 1000
+        : IDLE_TIMEOUT_MS
+    }
+  >
     <header class="ml-header">
       <div class="ml-header-inner">
         <div class="ml-top-row">

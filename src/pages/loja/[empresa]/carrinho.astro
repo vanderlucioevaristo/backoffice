@@ -22,7 +22,7 @@ Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
   secure: import.meta.env.PROD,
   sameSite: 'lax',
   path: '/',
-  maxAge: IDLE_TIMEOUT_SEC,
+  maxAge: cliente.tempoSessaoSegundos || IDLE_TIMEOUT_SEC,
 });
 
 // Busca o CEP cadastrado do cliente (se houver) para pré-preencher o cálculo de frete

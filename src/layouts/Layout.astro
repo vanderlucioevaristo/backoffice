@@ -152,7 +152,12 @@ if (!bare && user) {
           </div>
         </header>
         <main class="page"><slot /></main>
-        <script is:inline define:vars={{ IDLE_LIMIT_MS: IDLE_TIMEOUT_MS }}>
+        <script
+          is:inline
+          define:vars={{
+            IDLE_LIMIT_MS: user?.tempoSessaoSegundos ? user.tempoSessaoSegundos * 1000 : IDLE_TIMEOUT_MS,
+          }}
+        >
           (function () {
             let timer;
             function dropSession() {

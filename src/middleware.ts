@@ -35,7 +35,8 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     path === '/api/loja-chat' ||
     path === '/api/calcular-frete' ||
     path === '/api/consulta-cep' ||
-    path === '/api/consulta-doc';
+    path === '/api/consulta-doc' ||
+    path === '/api/infinitepay-webhook';
 
   if (!user && !PUBLIC.includes(path) && !isLojaPublic) {
     if (token) {

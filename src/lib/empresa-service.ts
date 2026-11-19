@@ -1004,6 +1004,269 @@ export async function criarCheckoutNuPay(params: {
   return { paymentUrl: null, origem: 'NENHUM' };
 }
 
+export function normalizarHandleInfinitePay(handleRaw?: string | null): string {
+  return String(handleRaw ?? '')
+    .trim()
+    .replace(/^\$+/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+export interface ItemCheckoutInfinitePay {
+  nome: string;
+  precoUnitario: number;
+  quantidade: number;
+}
+
+/**
+ * Monta os itens em centavos (padrão da API de Checkout Integrado da InfinitePay)
+ * e gera a URL direta de Link Integrado (https://checkout.infinitepay.io/{handle}?...)
+ */
+export function gerarUrlLinkIntegradoInfinitePay(params: {
+  handle: string;
+  pedidoId: number;
+  itens: ItemCheckoutInfinitePay[];
+  valorFrete?: number;
+  freteModalidade?: string | null;
+  clienteNome?: string | null;
+  clienteEmail?: string | null;
+  clienteTelefone?: string | null;
+  urlRetorno?: string;
+}): {
+  url: string | null;
+  orderNsu: string;
+  itemsPayload: Array<{ description: string; name: string; price: number; quantity: number }>;
+} {
+  const handle = normalizarHandleInfinitePay(params.handle);
+  const orderNsu = `PED-${params.pedidoId}`;
+
+  const itemsPayload: Array<{ description: string; name: string; price: number; quantity: number }> = [];
+  for (const it of params.itens) {
+    const qty = Math.max(1, Math.round(Number(it.quantidade) || 1));
+    const priceCents = Math.max(1, Math.round(Number(it.precoUnitario || 0) * 100));
+    const desc = String(it.nome || 'Produto').trim().slice(0, 120) || 'Produto';
+    itemsPayload.push({
+      description: desc,
+      name: desc,
+      price: priceCents,
+      quantity: qty,
+    });
+  }
+
+  const frete = Number(params.valorFrete || 0);
+  if (frete > 0) {
+    const freteCents = Math.round(frete * 100);
+    if (freteCents > 0) {
+      const descFrete = `Frete (${String(params.freteModalidade || 'Entrega').trim()})`.slice(0, 120);
+      itemsPayload.push({
+        description: descFrete,
+        name: descFrete,
+        price: freteCents,
+        quantity: 1,
+      });
+    }
+  }
+
+  if (!handle || itemsPayload.length === 0) {
+    return { url: null, orderNsu, itemsPayload };
+  }
+
+  const qs = new URLSearchParams();
+  qs.set(
+    'items',
+    JSON.stringify(
+      itemsPayload.map((i) => ({
+        name: i.name,
+        price: i.price,
+        quantity: i.quantity,
+      })),
+    ),
+  );
+  qs.set('order_nsu', orderNsu);
+  if (params.urlRetorno) qs.set('redirect_url', params.urlRetorno);
+  if (params.clienteNome) qs.set('customer_name', String(params.clienteNome).trim());
+  if (params.clienteEmail) qs.set('customer_email', String(params.clienteEmail).trim());
+  const fone = onlyDigits(String(params.clienteTelefone ?? ''));
+  if (fone.length >= 10) qs.set('customer_cellphone', fone);
+
+  return {
+    url: `https://checkout.infinitepay.io/${encodeURIComponent(handle)}?${qs.toString()}`,
+    orderNsu,
+    itemsPayload,
+  };
+}
+
+/**
+ * Integra com a API oficial de Checkout Integrado da InfinitePay (https://api.checkout.infinitepay.io/links)
+ * com fallback automático para Link Integrado (https://checkout.infinitepay.io/{handle})
+ */
+export async function criarCheckoutInfinitePay(params: {
+  handle?: string | null;
+  apiKey?: string | null;
+  pedidoId: number;
+  itens: ItemCheckoutInfinitePay[];
+  valorFrete?: number;
+  freteModalidade?: string | null;
+  clienteNome?: string | null;
+  clienteEmail?: string | null;
+  clienteTelefone?: string | null;
+  urlRetorno?: string;
+  urlWebhook?: string;
+}): Promise<{
+  paymentUrl: string | null;
+  slug: string | null;
+  orderNsu: string;
+  origem: 'INFINITEPAY_API' | 'INFINITEPAY_LINK' | 'NENHUM';
+}> {
+  const handle = normalizarHandleInfinitePay(params.handle);
+  const apiKey = String(params.apiKey ?? '').trim();
+  const base = gerarUrlLinkIntegradoInfinitePay({
+    handle: handle || 'loja',
+    pedidoId: params.pedidoId,
+    itens: params.itens,
+    valorFrete: params.valorFrete,
+    freteModalidade: params.freteModalidade,
+    clienteNome: params.clienteNome,
+    clienteEmail: params.clienteEmail,
+    clienteTelefone: params.clienteTelefone,
+    urlRetorno: params.urlRetorno,
+  });
+
+  if (!handle && !apiKey) {
+    return { paymentUrl: null, slug: null, orderNsu: base.orderNsu, origem: 'NENHUM' };
+  }
+
+  if (base.itemsPayload.length > 0) {
+    const bodyJson: Record<string, unknown> = {
+      order_nsu: base.orderNsu,
+      items: base.itemsPayload.map((i) => ({
+        description: i.description,
+        price: i.price,
+        quantity: i.quantity,
+      })),
+    };
+    if (handle) bodyJson.handle = handle;
+    if (params.urlRetorno) bodyJson.redirect_url = params.urlRetorno;
+    if (params.urlWebhook) bodyJson.webhook_url = params.urlWebhook;
+    if (params.clienteNome || params.clienteEmail || params.clienteTelefone) {
+      bodyJson.customer = {
+        name: String(params.clienteNome ?? '').trim() || undefined,
+        email: String(params.clienteEmail ?? '').trim() || undefined,
+        phone_number: onlyDigits(String(params.clienteTelefone ?? '')) || undefined,
+      };
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+    if (apiKey) {
+      headers['X-Api-Key'] = apiKey;
+    }
+
+    const endpoints = [
+      'https://api.checkout.infinitepay.io/links',
+      'https://api.infinitepay.io/invoices/public/checkout/links',
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(bodyJson),
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const urlRetornada = data?.url || data?.checkout_url || data?.link || data?.payment_url;
+          if (urlRetornada && /^https?:\/\//i.test(String(urlRetornada))) {
+            return {
+              paymentUrl: String(urlRetornada),
+              slug: data?.slug || data?.invoice_slug || null,
+              orderNsu: base.orderNsu,
+              origem: 'INFINITEPAY_API',
+            };
+          }
+        }
+      } catch {
+        // Continua para o próximo endpoint ou fallback direto
+      }
+    }
+  }
+
+  if (handle && base.url) {
+    return {
+      paymentUrl: base.url,
+      slug: null,
+      orderNsu: base.orderNsu,
+      origem: 'INFINITEPAY_LINK',
+    };
+  }
+
+  return { paymentUrl: null, slug: null, orderNsu: base.orderNsu, origem: 'NENHUM' };
+}
+
+/**
+ * Consulta o status de uma transação na InfinitePay (/payment_check)
+ */
+export async function verificarPagamentoInfinitePay(params: {
+  handle?: string | null;
+  apiKey?: string | null;
+  orderNsu: string;
+  transactionNsu?: string | null;
+  slug?: string | null;
+}): Promise<{ pago: boolean; confirmadoApi: boolean }> {
+  const handle = normalizarHandleInfinitePay(params.handle);
+  const apiKey = String(params.apiKey ?? '').trim();
+  const txNsu = String(params.transactionNsu ?? '').trim();
+  const slug = String(params.slug ?? '').trim();
+
+  if (!txNsu && !slug) {
+    return { pago: false, confirmadoApi: false };
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  if (apiKey) headers['X-Api-Key'] = apiKey;
+
+  const payload: Record<string, string> = {
+    order_nsu: params.orderNsu,
+  };
+  if (handle) payload.handle = handle;
+  if (txNsu) payload.transaction_nsu = txNsu;
+  if (slug) payload.slug = slug;
+
+  const endpoints = [
+    'https://api.checkout.infinitepay.io/payment_check',
+    'https://api.infinitepay.io/invoices/public/checkout/payment_check',
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        const data: any = await resp.json();
+        if (data?.paid === true || data?.success === true || data?.status === 'paid' || data?.status === 'approved') {
+          return { pago: true, confirmadoApi: true };
+        }
+        if (data?.paid === false) {
+          return { pago: false, confirmadoApi: true };
+        }
+      }
+    } catch {
+      // Se offline, usa confirmação pelos parâmetros de callback
+    }
+  }
+
+  return { pago: Boolean(txNsu), confirmadoApi: false };
+}
+
 export function gerarManifestoPwaLoja(empresa: {
   codigo: string;
   nome: string;

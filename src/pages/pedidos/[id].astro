@@ -2,7 +2,7 @@
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
 import { enviarEmailStatusPedido, STATUS_PEDIDO_INFO } from '../../lib/email';
-import { gerarPayloadPixNubank, criarCheckoutNuPay } from '../../lib/empresa-service';
+import { gerarPayloadPixNubank, criarCheckoutNuPay, criarCheckoutInfinitePay } from '../../lib/empresa-service';
 import { formatDoc, formatMoney, formatQty, str } from '../../lib/validate';
 
 const u = Astro.locals.user!;
@@ -47,11 +47,15 @@ if (Astro.request.method === 'POST') {
   if (acao === 'salvar_pagamento_nubank') {
     const pagamentoStatus = String(f.get('pagamento_status') ?? 'PENDENTE');
     let linkPag = str(f, 'nubank_link_pagamento', 500);
+    let linkInfinite = str(f, 'infinitepay_link_pagamento', 1500);
     const gerarPix = f.get('gerar_pix_nubank') === '1';
     const gerarNuPay = f.get('gerar_nupay_api') === '1';
+    const gerarInfinite = f.get('gerar_infinitepay') === '1';
 
     const empRow = await db()
-      .prepare('SELECT razao_social, nome_fantasia, cnpj, nubank_chave_pix, nubank_cidade_pix, nubank_link_padrao, nupay_merchant_key, nupay_merchant_token FROM empresas WHERE id = ?')
+      .prepare(
+        'SELECT razao_social, nome_fantasia, cnpj, nubank_chave_pix, nubank_cidade_pix, nubank_link_padrao, nupay_merchant_key, nupay_merchant_token, infinitepay_handle, infinitepay_api_key FROM empresas WHERE id = ?',
+      )
       .bind(u.empresaId)
       .first<any>();
 
@@ -85,12 +89,34 @@ if (Astro.request.method === 'POST') {
       if (nu.paymentUrl) linkPag = nu.paymentUrl;
     }
 
+    if (gerarInfinite) {
+      const inf = await criarCheckoutInfinitePay({
+        handle: empRow?.infinitepay_handle,
+        apiKey: empRow?.infinitepay_api_key,
+        pedidoId: id,
+        itens: itens.map((it) => ({
+          nome: String(it.produto_nome || 'Produto'),
+          precoUnitario: Number(it.preco_unitario || 0),
+          quantidade: Number(it.quantidade || 1),
+        })),
+        valorFrete: Number(pedido.valor_frete || 0),
+        freteModalidade: pedido.frete_modalidade,
+        clienteNome: String(pedido.cliente_nome || 'Cliente'),
+        clienteEmail: pedido.cliente_email,
+        clienteTelefone: pedido.cliente_celular || pedido.cliente_telefone,
+        urlRetorno: `${Astro.url.origin}/loja/${u.empresaCodigo}/meus-pedidos?infinitepay_pedido=${id}`,
+        urlWebhook: `${Astro.url.origin}/api/infinitepay-webhook?empresa=${u.empresaCodigo}&pedido=${id}`,
+      });
+      if (inf.paymentUrl) linkInfinite = inf.paymentUrl;
+    }
+
     await db()
       .prepare(
         `UPDATE loja_pedidos
             SET pagamento_status = ?,
                 nubank_link_pagamento = ?,
                 nubank_pix_copia_cola = ?,
+                infinitepay_link_pagamento = ?,
                 atualizado_em = datetime('now')
           WHERE id = ? AND empresa_id = ?`,
       )
@@ -98,6 +124,7 @@ if (Astro.request.method === 'POST') {
         ['PENDENTE', 'PAGO', 'CANCELADO'].includes(pagamentoStatus) ? pagamentoStatus : 'PENDENTE',
         linkPag || null,
         pixCode || null,
+        linkInfinite || null,
         id,
         u.empresaId,
       )
@@ -391,11 +418,35 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
         </div>
       </div>
 
-      <div class="c12 row" style="gap:10px">
-        <button style="background:#820ad1">💜 Salvar Pagamento Nubank</button>
+      <div class="c12">
+        <label>💚 Link de Checkout Integrado InfinitePay (Cartão até 12x ou Pix)</label>
+        <div class="row" style="gap:8px">
+          <input
+            name="infinitepay_link_pagamento"
+            value={pedido.infinitepay_link_pagamento ?? ''}
+            placeholder="Ex: https://checkout.infinitepay.io/..."
+            style="background:#ecfdf5"
+          />
+          {pedido.infinitepay_link_pagamento && (
+            <a
+              href={pedido.infinitepay_link_pagamento}
+              target="_blank"
+              rel="noopener"
+              class="btn sec sm"
+              style="white-space:nowrap;border-color:#059669;color:#059669"
+            >
+              Abrir InfinitePay ↗
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div class="c12 row" style="gap:10px;flex-wrap:wrap">
+        <button style="background:#820ad1">💾 Salvar Pagamento</button>
+        <button name="gerar_infinitepay" value="1" class="sec" style="border-color:#059669;color:#065f46">💚 Gerar Checkout InfinitePay</button>
         <button name="gerar_pix_nubank" value="1" class="sec">🔄 Gerar / Atualizar Pix Nubank</button>
         <button name="gerar_nupay_api" value="1" class="sec">⚡ Gerar Checkout NuPay</button>
-        <a class="btn sec" href="/loja-config">⚙️ Configurar Chave Pix / NuPay</a>
+        <a class="btn sec" href="/loja-config">⚙️ Configurar Pagamentos na Loja</a>
       </div>
     </form>
   </div>

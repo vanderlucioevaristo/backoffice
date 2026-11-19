@@ -1,7 +1,12 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
-import { calcularFreteCorreios, gerarPayloadPixNubank, criarCheckoutNuPay } from '../../../lib/empresa-service';
+import {
+  calcularFreteCorreios,
+  gerarPayloadPixNubank,
+  criarCheckoutNuPay,
+  criarCheckoutInfinitePay,
+} from '../../../lib/empresa-service';
 import { formatMoney, formatQty, nowLocalIso, onlyDigits, parseNum, str } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -49,6 +54,7 @@ let resumoPedidoConcluido: {
   formaPagamento: string;
   pixCopiaCola: string | null;
   linkPagamento: string | null;
+  infinitepayLink: string | null;
 } | null = null;
 const agora = nowLocalIso();
 
@@ -193,9 +199,10 @@ if (Astro.request.method === 'POST') {
 
       pedidoConcluidoId = ped!.id;
 
-      // Gera automaticamente o Pix Copia e Cola Nubank (padrão BR Code) e/ou Link NuPay somente quando habilitados na loja
+      // Gera automaticamente o Pix Copia e Cola Nubank, Link NuPay e/ou Link de Checkout InfinitePay conforme habilitados na loja
       const pixHabilitado = empresa.nubank_pix_ativo === 1;
       const linkHabilitado = empresa.nubank_link_ativo === 1;
+      const infinitepayHabilitado = empresa.infinitepay_ativo === 1;
 
       const chavePixAtiva = empresa.nubank_chave_pix || empresa.cnpj || '';
       const pixCopiaCola =
@@ -224,13 +231,42 @@ if (Astro.request.method === 'POST') {
           })
         : { paymentUrl: null, origem: 'NENHUM' as const };
 
+      const checkoutInfinite = infinitepayHabilitado
+        ? await criarCheckoutInfinitePay({
+            handle: empresa.infinitepay_handle,
+            apiKey: empresa.infinitepay_api_key,
+            pedidoId: pedidoConcluidoId,
+            itens: cartItens.map((it) => ({
+              nome: it.nome,
+              precoUnitario: it.preco_venda,
+              quantidade: it.quantidade,
+            })),
+            valorFrete,
+            freteModalidade,
+            clienteNome: cliente.nome,
+            clienteEmail: cliente.email,
+            urlRetorno: `${Astro.url.origin}/loja/${empCodigo}/meus-pedidos?infinitepay_pedido=${pedidoConcluidoId}`,
+            urlWebhook: `${Astro.url.origin}/api/infinitepay-webhook?empresa=${empCodigo}&pedido=${pedidoConcluidoId}`,
+          })
+        : { paymentUrl: null, slug: null, orderNsu: `PED-${pedidoConcluidoId}`, origem: 'NENHUM' as const };
+
       await db()
         .prepare(
           `UPDATE loja_pedidos
-              SET nubank_pix_copia_cola = ?, nubank_link_pagamento = ?
+              SET nubank_pix_copia_cola = ?,
+                  nubank_link_pagamento = ?,
+                  infinitepay_link_pagamento = ?,
+                  infinitepay_slug = ?
             WHERE id = ? AND empresa_id = ?`,
         )
-        .bind(pixCopiaCola || null, checkoutNu.paymentUrl || null, pedidoConcluidoId, empresa.id)
+        .bind(
+          pixCopiaCola || null,
+          checkoutNu.paymentUrl || null,
+          checkoutInfinite.paymentUrl || null,
+          checkoutInfinite.slug || null,
+          pedidoConcluidoId,
+          empresa.id,
+        )
         .run();
 
       resumoPedidoConcluido = {
@@ -241,6 +277,7 @@ if (Astro.request.method === 'POST') {
         formaPagamento,
         pixCopiaCola: pixCopiaCola || null,
         linkPagamento: checkoutNu.paymentUrl || null,
+        infinitepayLink: checkoutInfinite.paymentUrl || null,
       };
 
       for (const it of cartItens) {
@@ -411,6 +448,31 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
           <div><strong>Modalidade de Entrega:</strong> {resumoPedidoConcluido.freteModalidade} (até {resumoPedidoConcluido.prazoDias} dia(s) útil(eis))</div>
           <div><strong>Valor do Frete:</strong> {formatMoney(resumoPedidoConcluido.valorFrete)}</div>
           <div><strong>Total Final do Pedido:</strong> <span style="color:var(--pr);font-weight:800">{formatMoney(resumoPedidoConcluido.valorTotal)}</span></div>
+        </div>
+      )}
+
+      {resumoPedidoConcluido && resumoPedidoConcluido.infinitepayLink && (
+        <div style="padding:18px;background:#ecfdf5;border:2px solid #10b981;border-radius:14px;margin:16px 0">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+            <span style="background:#059669;color:#fff;font-weight:800;padding:4px 10px;border-radius:99px;font-size:12px">
+              InfinitePay
+            </span>
+            <h3 style="margin:0;color:#065f46;font-size:17px">
+              💚 Checkout InfinitePay — Pedido #{pedidoConcluidoId} ({formatMoney(resumoPedidoConcluido.valorTotal)})
+            </h3>
+          </div>
+          <p class="muted" style="margin:0 0 12px;font-size:13px;color:#047857">
+            Pague com <strong>Cartão de Crédito em até 12x</strong> ou <strong>Pix com Taxa Zero</strong> no ambiente seguro da InfinitePay. Ao concluir, seu pedido será confirmado automaticamente.
+          </p>
+          <a
+            href={resumoPedidoConcluido.infinitepayLink}
+            target="_blank"
+            rel="noopener"
+            class="btn"
+            style="background:#059669;color:#fff;font-weight:700;padding:11px 18px;border-radius:8px;display:inline-flex;align-items:center;gap:8px"
+          >
+            💚 Pagar agora com InfinitePay (Cartão até 12x ou Pix) ↗
+          </a>
         </div>
       )}
 
@@ -695,11 +757,29 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
         </div>
         )}
 
-        <!-- Seleção de Forma de Pagamento Nubank (exibe apenas as opções habilitadas em Minha Loja) -->
-        {(empresa.nubank_pix_ativo === 1 || empresa.nubank_link_ativo === 1) && (
+        <!-- Seleção de Forma de Pagamento (exibe apenas as opções habilitadas em Minha Loja) -->
+        {(empresa.nubank_pix_ativo === 1 || empresa.nubank_link_ativo === 1 || empresa.infinitepay_ativo === 1) && (
           <div class="frete-box" style="border-color:#e9d5ff;background:#faf5ff">
-            <h3 style="margin:0 0 6px;font-size:16px;color:#581c87">💜 Forma de Pagamento (Nubank)</h3>
+            <h3 style="margin:0 0 6px;font-size:16px;color:#581c87">💳 Forma de Pagamento</h3>
             <div class="frete-opcoes" style="margin-top:8px">
+              {empresa.infinitepay_ativo === 1 && (
+                <label
+                  class={`frete-card ${empresa.nubank_pix_ativo !== 1 && empresa.nubank_link_ativo !== 1 ? 'ativo' : ''}`}
+                  style="border-color:#6ee7b7;background:#ecfdf5"
+                >
+                  <input
+                    type="radio"
+                    name="forma_pagamento"
+                    value="INFINITEPAY"
+                    checked={empresa.nubank_pix_ativo !== 1 && empresa.nubank_link_ativo !== 1}
+                    style="width:auto"
+                  />
+                  <div>
+                    <div style="font-weight:700;color:#065f46">💚 InfinitePay (Cartão em até 12x ou Pix)</div>
+                    <div class="muted" style="font-size:12px">Checkout integrado InfinitePay com confirmação automática</div>
+                  </div>
+                </label>
+              )}
               {empresa.nubank_pix_ativo === 1 && (
                 <label class="frete-card ativo" style="border-color:#c084fc">
                   <input type="radio" name="forma_pagamento" value="PIX_NUBANK" checked style="width:auto" />

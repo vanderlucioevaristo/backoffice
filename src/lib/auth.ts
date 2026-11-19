@@ -353,6 +353,12 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN frete_provedor TEXT NOT NULL DEFAULT 'CORREIOS'",
       "ALTER TABLE empresas ADD COLUMN cepcerto_public_key TEXT NOT NULL DEFAULT 'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459'",
       "ALTER TABLE empresas ADD COLUMN tempo_sessao_minutos INTEGER NOT NULL DEFAULT 10",
+      "ALTER TABLE empresas ADD COLUMN infinitepay_ativo INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE empresas ADD COLUMN infinitepay_handle TEXT",
+      "ALTER TABLE empresas ADD COLUMN infinitepay_api_key TEXT",
+      "ALTER TABLE loja_pedidos ADD COLUMN infinitepay_link_pagamento TEXT",
+      "ALTER TABLE loja_pedidos ADD COLUMN infinitepay_slug TEXT",
+      "ALTER TABLE loja_pedidos ADD COLUMN infinitepay_transaction_nsu TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -515,6 +521,9 @@ export type LojaEmpresa = {
   nubank_link_padrao: string | null;
   nupay_merchant_key: string | null;
   nupay_merchant_token: string | null;
+  infinitepay_ativo: number;
+  infinitepay_handle: string | null;
+  infinitepay_api_key: string | null;
 };
 
 export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null> {
@@ -544,7 +553,10 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               COALESCE(NULLIF(nubank_cidade_pix, ''), 'SAO PAULO') AS nubank_cidade_pix,
               nubank_link_padrao,
               nupay_merchant_key,
-              nupay_merchant_token
+              nupay_merchant_token,
+              COALESCE(infinitepay_ativo, 0) AS infinitepay_ativo,
+              infinitepay_handle,
+              infinitepay_api_key
          FROM empresas
         WHERE codigo = ? AND ativa = 1`,
     )

@@ -1,7 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { db } from '../lib/auth';
-import { DIAS_SEMANA_LABELS } from '../lib/empresa-service';
+import { DIAS_SEMANA_LABELS, normalizarHandleInfinitePay } from '../lib/empresa-service';
 import { onlyDigits, str } from '../lib/validate';
 
 const u = Astro.locals.user!;
@@ -35,7 +35,10 @@ let emp = await db()
             COALESCE(NULLIF(nubank_cidade_pix, ''), 'SAO PAULO') AS nubank_cidade_pix,
             nubank_link_padrao,
             nupay_merchant_key,
-            nupay_merchant_token
+            nupay_merchant_token,
+            COALESCE(infinitepay_ativo, 0) AS infinitepay_ativo,
+            infinitepay_handle,
+            infinitepay_api_key
        FROM empresas WHERE id = ?`,
   )
   .bind(u.empresaId)
@@ -88,6 +91,9 @@ if (Astro.request.method === 'POST') {
   const nubankLinkPadrao = str(f, 'nubank_link_padrao', 400);
   const nupayMerchantKey = str(f, 'nupay_merchant_key', 160);
   const nupayMerchantToken = str(f, 'nupay_merchant_token', 240);
+  const infinitepayAtivo = f.get('infinitepay_ativo') ? 1 : 0;
+  const infinitepayHandle = normalizarHandleInfinitePay(str(f, 'infinitepay_handle', 80));
+  const infinitepayApiKey = str(f, 'infinitepay_api_key', 240);
 
   if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
     erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
@@ -104,7 +110,8 @@ if (Astro.request.method === 'POST') {
                 frete_provedor = ?, cepcerto_public_key = ?, tempo_sessao_minutos = ?,
                 nubank_pix_ativo = ?, nubank_link_ativo = ?,
                 nubank_chave_pix = ?, nubank_cidade_pix = ?, nubank_link_padrao = ?,
-                nupay_merchant_key = ?, nupay_merchant_token = ?
+                nupay_merchant_key = ?, nupay_merchant_token = ?,
+                infinitepay_ativo = ?, infinitepay_handle = ?, infinitepay_api_key = ?
           WHERE id = ?`,
       )
       .bind(
@@ -145,6 +152,9 @@ if (Astro.request.method === 'POST') {
         nubankLinkPadrao || null,
         nupayMerchantKey || null,
         nupayMerchantToken || null,
+        infinitepayAtivo,
+        infinitepayHandle || null,
+        infinitepayApiKey || null,
         u.empresaId,
       )
       .run();
@@ -187,6 +197,9 @@ if (Astro.request.method === 'POST') {
       nubank_link_padrao: nubankLinkPadrao,
       nupay_merchant_key: nupayMerchantKey,
       nupay_merchant_token: nupayMerchantToken,
+      infinitepay_ativo: infinitepayAtivo,
+      infinitepay_handle: infinitepayHandle,
+      infinitepay_api_key: infinitepayApiKey,
     };
     ok = true;
   }
@@ -468,6 +481,57 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             value={emp.nupay_merchant_token ?? ''}
             placeholder="Token comercial NuPay for Business"
           />
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="border-left:4px solid #10b981">
+      <h2 style="color:#047857">💚 Pagamento InfinitePay (Checkout Integrado — Cartão em até 12x e Pix)</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Integre sua loja com o <strong>Checkout Integrado da InfinitePay</strong> (<code>api.checkout.infinitepay.io/links</code> / <code>checkout.infinitepay.io</code>) para receber via <strong>Cartão de Crédito em até 12x</strong> ou <strong>Pix com Taxa Zero</strong> com baixa automática do pedido via Webhook e URL de retorno.
+      </p>
+      <div class="grid">
+        <div class="c12">
+          <label class="check" style="font-size:14.5px;font-weight:700;color:#065f46;padding:10px 12px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px">
+            <input type="checkbox" name="infinitepay_ativo" value="1" checked={emp.infinitepay_ativo === 1} />
+            Habilitar opção "💚 InfinitePay (Cartão em até 12x ou Pix)" na Loja
+          </label>
+        </div>
+
+        <div class="c4">
+          <label>InfiniteTag / Handle da conta InfinitePay (sem o <code>$</code>)</label>
+          <input
+            name="infinitepay_handle"
+            value={emp.infinitepay_handle ?? ''}
+            placeholder="Ex: minhaloja (sua InfiniteTag sem o $)"
+          />
+          <small class="muted" style="display:block;margin-top:3px">
+            Usada para criar o link de checkout com os itens e o frete do pedido em centavos.
+          </small>
+        </div>
+        <div class="c4">
+          <label>Chave de API InfinitePay (<code>X-Api-Key</code> — opcional)</label>
+          <input
+            type="password"
+            name="infinitepay_api_key"
+            value={emp.infinitepay_api_key ?? ''}
+            placeholder="Ex: inchk_..."
+          />
+          <small class="muted" style="display:block;margin-top:3px">
+            Se informada, autentica na API <code>https://api.checkout.infinitepay.io/links</code>.
+          </small>
+        </div>
+        <div class="c4">
+          <label>URL de Webhook Automático InfinitePay</label>
+          <input
+            readonly
+            value={`${Astro.url.origin}/api/infinitepay-webhook?empresa=${emp.codigo}`}
+            onclick="this.select()"
+            style="background:#f8fafc;font-size:12px"
+          />
+          <small class="muted" style="display:block;margin-top:3px">
+            Enviada automaticamente no checkout para confirmar o pagamento do pedido.
+          </small>
         </div>
       </div>
     </div>

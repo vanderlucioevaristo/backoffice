@@ -1,6 +1,7 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
+import { verificarPagamentoInfinitePay } from '../../../lib/empresa-service';
 import { formatMoney, formatQty } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -24,12 +25,46 @@ Astro.cookies.set(CLIENT_SESSION_COOKIE, token!, {
   maxAge: cliente.tempoSessaoSegundos || IDLE_TIMEOUT_SEC,
 });
 
+// Se o cliente retornou do checkout da InfinitePay com transaction_nsu / slug / order_nsu, verifica e confirma o pagamento
+let msgInfinitePay = '';
+const sp = Astro.url.searchParams;
+const infPedidoRaw = sp.get('infinitepay_pedido') || sp.get('order_nsu') || '';
+const infTxNsu = sp.get('transaction_nsu') || '';
+const infSlug = sp.get('slug') || sp.get('invoice_slug') || '';
+const infMatch = /(\d+)/.exec(infPedidoRaw);
+const infPedidoId = infMatch ? Number(infMatch[1]) : 0;
+
+if (infPedidoId > 0 && (infTxNsu || infSlug)) {
+  const check = await verificarPagamentoInfinitePay({
+    handle: empresa.infinitepay_handle,
+    apiKey: empresa.infinitepay_api_key,
+    orderNsu: `PED-${infPedidoId}`,
+    transactionNsu: infTxNsu,
+    slug: infSlug,
+  });
+  if (check.pago) {
+    await db()
+      .prepare(
+        `UPDATE loja_pedidos
+            SET pagamento_status = 'PAGO',
+                infinitepay_slug = COALESCE(?, infinitepay_slug),
+                infinitepay_transaction_nsu = COALESCE(?, infinitepay_transaction_nsu),
+                atualizado_em = datetime('now')
+          WHERE id = ? AND empresa_id = ? AND parceiro_id = ?`,
+      )
+      .bind(infSlug || null, infTxNsu || null, infPedidoId, empresa.id, cliente.id)
+      .run();
+    msgInfinitePay = `💚 Pagamento do Pedido #${infPedidoId} confirmado via InfinitePay!`;
+  }
+}
+
 const { results: pedidos } = await db()
   .prepare(
     `SELECT id, valor_total, COALESCE(valor_frete, 0) AS valor_frete,
             frete_modalidade, frete_prazo_dias, cep_entrega,
             COALESCE(pagamento_status, 'PENDENTE') AS pagamento_status,
             nubank_pix_copia_cola, nubank_link_pagamento,
+            infinitepay_link_pagamento,
             status, observacoes, criado_em
        FROM loja_pedidos
       WHERE empresa_id = ? AND parceiro_id = ?
@@ -46,6 +81,7 @@ const { results: pedidos } = await db()
     pagamento_status: string;
     nubank_pix_copia_cola: string | null;
     nubank_link_pagamento: string | null;
+    infinitepay_link_pagamento: string | null;
     status: string;
     observacoes: string | null;
     criado_em: string;
@@ -91,6 +127,8 @@ const baseUrl = `/loja/${empCodigo}`;
     <a class="btn sec" href={baseUrl}>← Voltar ao catálogo</a>
   </div>
 
+  {msgInfinitePay && <div class="msg ok">{msgInfinitePay}</div>}
+
   {pedidos.length === 0 ? (
     <div class="card muted">
       Você ainda não realizou nenhum pedido. <a href={baseUrl}>Explore nossos produtos</a>.
@@ -121,6 +159,31 @@ const baseUrl = `/loja/${empCodigo}`;
             <span class="spacer"></span>
             <strong style="font-size:17px;color:var(--pr)">{formatMoney(ped.valor_total)}</strong>
           </div>
+
+          {ped.status !== 'cancelado' &&
+            ped.pagamento_status !== 'PAGO' &&
+            empresa.infinitepay_ativo === 1 &&
+            ped.infinitepay_link_pagamento && (
+            <div style="margin-bottom:12px;padding:12px 14px;background:#ecfdf5;border:1.5px solid #34d399;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="background:#059669;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:99px">
+                  InfinitePay
+                </span>
+                <strong style="color:#065f46;font-size:13.5px">
+                  Checkout InfinitePay ({formatMoney(ped.valor_total)} — Cartão em até 12x ou Pix):
+                </strong>
+              </div>
+              <a
+                href={ped.infinitepay_link_pagamento}
+                target="_blank"
+                rel="noopener"
+                class="btn sm"
+                style="background:#059669;color:#fff;font-weight:700"
+              >
+                💚 Pagar com InfinitePay ↗
+              </a>
+            </div>
+          )}
 
           {ped.status !== 'cancelado' &&
             ped.pagamento_status !== 'PAGO' &&

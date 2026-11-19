@@ -18,6 +18,8 @@ import {
   contarNotificacoesAgendamentoBackoffice,
   calcularFreteCorreios,
   gerarPayloadPixNubank,
+  gerarUrlLinkIntegradoInfinitePay,
+  normalizarHandleInfinitePay,
   gerarManifestoPwaLoja,
   IDLE_TIMEOUT_SEC,
   IDLE_TIMEOUT_MS,
@@ -521,5 +523,37 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(usrDepois.nome, 'Admin Novo Nome');
     assert.equal(usrDepois.login, 'adminnovo');
     assert.equal(usrDepois.email, 'novo@loja.com');
+  });
+
+  test('gera checkout integrado InfinitePay normalizando InfiniteTag ($handle) e convertendo itens + frete para centavos', () => {
+    assert.equal(normalizarHandleInfinitePay('$MinhaLoja'), 'minhaloja');
+    assert.equal(normalizarHandleInfinitePay('  $$vanderltda  '), 'vanderltda');
+
+    const res = gerarUrlLinkIntegradoInfinitePay({
+      handle: '$vanderltda',
+      pedidoId: 99,
+      itens: [
+        { nome: 'Smartphone 5G', precoUnitario: 1999.9, quantidade: 1 },
+        { nome: 'Capinha Protetora', precoUnitario: 49.5, quantidade: 2 },
+      ],
+      valorFrete: 28.4,
+      freteModalidade: 'Correios SEDEX',
+      clienteNome: 'Maria Souza',
+      clienteEmail: 'maria@exemplo.com',
+      clienteTelefone: '(11) 98888-7777',
+      urlRetorno: 'https://loja.exemplo.com/loja/vanderltda/meus-pedidos?infinitepay_pedido=99',
+    });
+
+    assert.equal(res.orderNsu, 'PED-99');
+    assert.equal(res.itemsPayload.length, 3);
+    // Preços em centavos (inteiros)
+    assert.equal(res.itemsPayload[0].price, 199990);
+    assert.equal(res.itemsPayload[0].quantity, 1);
+    assert.equal(res.itemsPayload[1].price, 4950);
+    assert.equal(res.itemsPayload[1].quantity, 2);
+    assert.equal(res.itemsPayload[2].price, 2840);
+    assert.equal(res.itemsPayload[2].quantity, 1);
+    assert.ok(res.url && res.url.startsWith('https://checkout.infinitepay.io/vanderltda?'));
+    assert.ok(res.url!.includes('order_nsu=PED-99'));
   });
 });

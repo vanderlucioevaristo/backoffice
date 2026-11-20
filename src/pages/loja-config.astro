@@ -242,9 +242,81 @@ const urlLoja = `/loja/${emp.codigo}`;
 const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
 ---
 <Layout title="Personalizar Loja Virtual" active="loja-config">
+  <style is:global>
+    #form-loja .card.cfg-card {
+      padding: 0;
+      overflow: hidden;
+      transition: box-shadow 0.15s ease;
+    }
+    #form-loja .card.cfg-card:hover {
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
+    }
+    #form-loja .cfg-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 18px;
+      cursor: pointer;
+      user-select: none;
+      background: #ffffff;
+      transition: background 0.15s ease;
+    }
+    #form-loja .cfg-head:hover {
+      background: #f8fafc;
+    }
+    #form-loja .cfg-head h2 {
+      margin: 0 !important;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #form-loja .cfg-toggle-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748b;
+      background: #f1f5f9;
+      padding: 4px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+    }
+    #form-loja .cfg-card.open .cfg-toggle-hint {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+    #form-loja .cfg-chevron {
+      display: inline-block;
+      transition: transform 0.2s ease;
+      font-size: 11px;
+    }
+    #form-loja .cfg-card.open .cfg-chevron {
+      transform: rotate(180deg);
+    }
+    #form-loja .cfg-body {
+      display: none;
+      padding: 4px 18px 18px;
+      border-top: 1px solid #e2e8f0;
+      background: #ffffff;
+    }
+    #form-loja .cfg-card.open .cfg-body {
+      display: block;
+    }
+  </style>
+
   <div class="row">
-    <h1>Personalizar Minha Loja Virtual</h1>
+    <div>
+      <h1 style="margin-bottom:2px">Personalizar Minha Loja Virtual</h1>
+      <span class="muted" style="font-size:13px">
+        Clique no título de qualquer parâmetro abaixo para expandir ou recolher suas opções.
+      </span>
+    </div>
     <span class="spacer"></span>
+    <button type="button" class="sec sm" id="btn-toggle-all-cfg">📂 Expandir todos</button>
     <a class="btn" href={urlLoja} target="_blank">🛒 Abrir minha loja ({urlLoja}) ↗</a>
   </div>
   {erro && <div class="msg err">{erro}</div>}
@@ -252,9 +324,13 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   {msgEmailTeste && <div class={`msg ${emailTesteOk ? 'ok' : 'err'}`}>{msgEmailTeste}</div>}
 
   <form method="post" id="form-loja">
-    <div class="card">
-      <h2>Identidade e Logomarca</h2>
-      <div class="grid">
+    <div class="card cfg-card" style="border-left:4px solid #334155">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2>🏪 Identidade, Logomarca e Tempo de Queda do Login</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <div class="grid" style="margin-top:8px">
         <div class="c6">
           <label>Nome de exibição na loja</label>
           <input name="loja_nome" id="inp-nome" value={emp.loja_nome ?? ''} placeholder={emp.nome_fantasia || emp.razao_social} />
@@ -293,11 +369,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           </small>
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>📅 Agenda de Serviços na Loja Virtual</h2>
-      <div class="grid">
+    <div class="card cfg-card" style="border-left:4px solid #0f766e">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2 style="color:#0f766e">📅 Agenda de Serviços na Loja Virtual</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <div class="grid" style="margin-top:8px">
         <div class="c12">
           <label class="check" style="font-size:15px;font-weight:700;color:#0f172a">
             <input type="checkbox" name="agenda_ativa" value="1" checked={emp.agenda_ativa === 1} />
@@ -382,11 +463,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           </small>
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card" style="border-left:4px solid #0284c7">
-      <h2 style="color:#0369a1">🚚 Cálculo de Frete na Loja (Correios ou CEP Certo Multi-Fornecedor)</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">
+    <div class="card cfg-card" style="border-left:4px solid #0284c7">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2 style="color:#0369a1">🚚 Cálculo de Frete na Loja (Correios ou CEP Certo Multi-Fornecedor)</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <p class="muted" style="margin-top:8px;font-size:13px">
         Escolha se a loja deve usar o cálculo interno <strong>somente com os Correios (PAC e SEDEX)</strong> ou a integração com o widget <strong>CEP Certo</strong> (cálculo em vários fornecedores/transportadoras). Quando o <strong>CEP Certo</strong> é habilitado, a exibição de frete na vitrine de produtos é desabilitada automaticamente.
       </p>
       <div class="grid">
@@ -441,11 +527,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           </label>
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card" style="border-left:4px solid #820ad1">
-      <h2 style="color:#820ad1">💜 Pagamento Nubank (Pix Automático, Link de Cobrança e NuPay)</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">
+    <div class="card cfg-card" style="border-left:4px solid #820ad1">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2 style="color:#820ad1">💜 Pagamento Nubank (Pix Automático, Link de Cobrança e NuPay)</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <p class="muted" style="margin-top:8px;font-size:13px">
         Configure sua chave Pix do Nubank para gerar automaticamente o <strong>QR Code Pix + Copia e Cola</strong> com o valor exato do pedido, o link de cobrança do Nubank PJ ou suas credenciais da API comercial <strong>NuPay for Business</strong>.
       </p>
       <div class="grid">
@@ -517,11 +608,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           />
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card" style="border-left:4px solid #10b981">
-      <h2 style="color:#047857">💚 Pagamento InfinitePay (Checkout Integrado — Cartão em até 12x e Pix)</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">
+    <div class="card cfg-card" style="border-left:4px solid #10b981">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2 style="color:#047857">💚 Pagamento InfinitePay (Checkout Integrado — Cartão em até 12x e Pix)</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <p class="muted" style="margin-top:8px;font-size:13px">
         Integre sua loja com o <strong>Checkout Integrado da InfinitePay</strong> (<code>api.checkout.infinitepay.io/links</code> / <code>checkout.infinitepay.io</code>) para receber via <strong>Cartão de Crédito em até 12x</strong> ou <strong>Pix com Taxa Zero</strong> com baixa automática do pedido via Webhook e URL de retorno.
       </p>
       <div class="grid">
@@ -568,11 +664,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           </small>
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card" style="border-left:4px solid #2563eb">
-      <h2 style="color:#1d4ed8">✉️ Notificações de E-mail para Clientes (Resend / Webhook)</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">
+    <div class="card cfg-card" style="border-left:4px solid #2563eb">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2 style="color:#1d4ed8">✉️ Notificações de E-mail para Clientes (Resend / Webhook)</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <p class="muted" style="margin-top:8px;font-size:13px">
         Configure sua chave do <a href="https://resend.com/api-keys" target="_blank" rel="noopener"><strong>Resend.com</strong></a> (gratuito até 3.000 e-mails/mês) para disparar automaticamente os e-mails de atualização de status dos pedidos diretamente para a caixa de entrada dos clientes.
       </p>
       <div class="grid">
@@ -650,11 +751,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           </small>
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>Cores da Loja</h2>
-      <div class="grid">
+    <div class="card cfg-card" style="border-left:4px solid #eab308">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2>🎨 Cores da Loja</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <div class="grid" style="margin-top:8px">
         <div class="c3">
           <label>Cor principal (botões e destaques)</label>
           <input type="color" name="cor_primaria" id="inp-cp" value={emp.cor_primaria || '#2563eb'} style="height:42px;padding:4px" />
@@ -672,11 +778,16 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           <input type="color" name="cor_texto" id="inp-ct" value={emp.cor_texto || '#1c2430'} style="height:42px;padding:4px" />
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>Rodapé Personalizável da Loja (Contato, Suporte e Endereço)</h2>
-      <div class="grid">
+    <div class="card cfg-card" style="border-left:4px solid #64748b">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2>📍 Rodapé Personalizável da Loja (Contato, Suporte e Endereço)</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body">
+      <div class="grid" style="margin-top:8px">
         <div class="c3">
           <label>Telefone de contato</label>
           <input name="rodape_telefone" id="inp-rtel" value={emp.rodape_telefone ?? ''} placeholder="(11) 3000-0000" />
@@ -750,10 +861,15 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           />
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>Pré-visualização ao vivo</h2>
+    <div class="card cfg-card" style="border-left:4px solid #475569">
+      <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
+        <h2>👁️ Pré-visualização ao vivo</h2>
+        <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
+      </div>
+      <div class="cfg-body" style="padding-top:14px">
       <div id="preview-box" style={`border:1px solid var(--bd);border-radius:10px;overflow:hidden;background:${emp.cor_fundo};color:${emp.cor_texto}`}>
         <div id="prev-top" style={`display:flex;align-items:center;gap:14px;padding:12px 20px;background:${emp.cor_secundaria};color:#fff`}>
           <img
@@ -805,6 +921,7 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           </div>
         </div>
       </div>
+      </div>
     </div>
 
     <div class="row">
@@ -814,6 +931,52 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
 </Layout>
 
 <script is:inline>
+  // Controle de colapso/expansão dos parâmetros da loja (todos iniciam colapsados por padrão)
+  (function () {
+    const cards = Array.from(document.querySelectorAll('#form-loja .cfg-card'));
+    const btnToggleAll = document.getElementById('btn-toggle-all-cfg');
+
+    function setCardState(card, open) {
+      card.classList.toggle('open', open);
+      const head = card.querySelector('.cfg-head');
+      const lbl = card.querySelector('.cfg-toggle-lbl');
+      if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (lbl) lbl.textContent = open ? 'Recolher' : 'Clique para abrir';
+    }
+
+    function updateToggleAllBtn() {
+      if (!btnToggleAll) return;
+      const allOpen = cards.length > 0 && cards.every((c) => c.classList.contains('open'));
+      btnToggleAll.textContent = allOpen ? '📁 Recolher todos' : '📂 Expandir todos';
+    }
+
+    cards.forEach((card) => {
+      const head = card.querySelector('.cfg-head');
+      if (!head) return;
+      head.addEventListener('click', () => {
+        const nextState = !card.classList.contains('open');
+        setCardState(card, nextState);
+        updateToggleAllBtn();
+      });
+      head.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          const nextState = !card.classList.contains('open');
+          setCardState(card, nextState);
+          updateToggleAllBtn();
+        }
+      });
+    });
+
+    if (btnToggleAll) {
+      btnToggleAll.addEventListener('click', () => {
+        const allOpen = cards.length > 0 && cards.every((c) => c.classList.contains('open'));
+        cards.forEach((c) => setCardState(c, !allOpen));
+        updateToggleAllBtn();
+      });
+    }
+  })();
+
   const inpFile = document.getElementById('inp-file-logo');
   const inpLogo = document.getElementById('inp-logo');
   const inpNome = document.getElementById('inp-nome');

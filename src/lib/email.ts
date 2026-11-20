@@ -211,10 +211,38 @@ export async function enviarEmailStatusPedido(dados: DadosEmailStatusPedido): Pr
     };
   }
 
+  const cfgEmp = await db()
+    .prepare(
+      `SELECT COALESCE(email_notificacoes_ativo, 1) AS email_notificacoes_ativo,
+              resend_api_key,
+              email_remetente,
+              email_webhook_url
+         FROM empresas
+        WHERE id = ?`,
+    )
+    .bind(dados.empresaId)
+    .first<{
+      email_notificacoes_ativo: number;
+      resend_api_key: string | null;
+      email_remetente: string | null;
+      email_webhook_url: string | null;
+    }>()
+    .catch(() => null);
+
+  if (cfgEmp && Number(cfgEmp.email_notificacoes_ativo) === 0) {
+    return {
+      enviado: false,
+      modo: 'REGISTRADO',
+      detalhe: 'Notificações por e-mail desabilitadas nas configurações da loja.',
+    };
+  }
+
   const runtimeEnv = env as unknown as Record<string, string | undefined>;
-  const resendApiKey = runtimeEnv.RESEND_API_KEY;
-  const emailFrom = runtimeEnv.EMAIL_FROM || `nao-responda@${dados.empresaCodigo || 'loja'}.com.br`;
-  const webhookUrl = runtimeEnv.EMAIL_WEBHOOK_URL;
+  const resendApiKey = String(cfgEmp?.resend_api_key || runtimeEnv.RESEND_API_KEY || '').trim();
+  const emailFrom = String(
+    cfgEmp?.email_remetente || runtimeEnv.EMAIL_FROM || 'onboarding@resend.dev',
+  ).trim();
+  const webhookUrl = String(cfgEmp?.email_webhook_url || runtimeEnv.EMAIL_WEBHOOK_URL || '').trim();
 
   let statusEnvio = 'ENVIADO';
   let modo: 'API' | 'REGISTRADO' = 'REGISTRADO';
@@ -316,4 +344,87 @@ export async function enviarEmailStatusPedido(dados: DadosEmailStatusPedido): Pr
     modo,
     detalhe,
   };
+}
+
+export async function enviarEmailTesteConfiguracao(params: {
+  empresaNome: string;
+  destinatario: string;
+  resendApiKey?: string | null;
+  emailRemetente?: string | null;
+  emailWebhookUrl?: string | null;
+}): Promise<{ ok: boolean; mensagem: string }> {
+  const dest = String(params.destinatario ?? '').trim();
+  if (!dest || !dest.includes('@')) {
+    return { ok: false, mensagem: 'Informe um e-mail destinatário válido para o teste.' };
+  }
+
+  const runtimeEnv = env as unknown as Record<string, string | undefined>;
+  const apiKey = String(params.resendApiKey || runtimeEnv.RESEND_API_KEY || '').trim();
+  const fromEmail = String(params.emailRemetente || runtimeEnv.EMAIL_FROM || 'onboarding@resend.dev').trim();
+  const webhookUrl = String(params.emailWebhookUrl || runtimeEnv.EMAIL_WEBHOOK_URL || '').trim();
+
+  const assunto = `[${params.empresaNome}] E-mail de Teste — Notificações da Loja`;
+  const html = `<!doctype html>
+<html lang="pt-BR">
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:24px;background:#f8fafc;color:#0f172a">
+  <div style="max-width:540px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:24px">
+    <h2 style="margin:0 0 12px;color:#1e40af">✅ Configuração de E-mail Funcionando!</h2>
+    <p style="font-size:14px;line-height:1.5;color:#334155">
+      Este é um disparo de teste da loja <strong>${escapeHtml(params.empresaNome)}</strong>.
+      As notificações automáticas de atualização de pedidos estão prontas para envio aos clientes.
+    </p>
+    <p style="font-size:12px;color:#64748b;margin-top:18px">Remetente configurado: <code>${escapeHtml(fromEmail)}</code></p>
+  </div>
+</body>
+</html>`;
+  const text = `Configuração de E-mail Funcionando! Este é um disparo de teste da loja ${params.empresaNome}.`;
+
+  try {
+    if (apiKey) {
+      const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: `${params.empresaNome} <${fromEmail}>`,
+          to: [dest],
+          subject: assunto,
+          html,
+          text,
+        }),
+      });
+      if (resp.ok) {
+        return { ok: true, mensagem: `E-mail de teste enviado com sucesso via Resend para ${dest}!` };
+      }
+      const errBody = await resp.text().catch(() => '');
+      return {
+        ok: false,
+        mensagem: `O Resend retornou HTTP ${resp.status}: ${errBody.slice(0, 220)}`,
+      };
+    }
+
+    if (webhookUrl) {
+      const resp = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: dest, from: fromEmail, subject: assunto, html, text }),
+      });
+      if (resp.ok) {
+        return { ok: true, mensagem: `E-mail de teste enviado com sucesso via Webhook para ${dest}!` };
+      }
+      return { ok: false, mensagem: `O Webhook retornou HTTP ${resp.status}.` };
+    }
+
+    return {
+      ok: false,
+      mensagem: 'Informe sua Chave de API do Resend (re_...) ou uma URL de Webhook antes de testar.',
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      mensagem: `Erro de conexão ao tentar disparar o e-mail de teste: ${e?.message || 'falha de rede'}`,
+    };
+  }
 }

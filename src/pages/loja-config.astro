@@ -1,6 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { db } from '../lib/auth';
+import { enviarEmailTesteConfiguracao } from '../lib/email';
 import { DIAS_SEMANA_LABELS, normalizarHandleInfinitePay } from '../lib/empresa-service';
 import { onlyDigits, str } from '../lib/validate';
 
@@ -9,6 +10,8 @@ const validColor = (c: string, def: string) => (/^#[0-9a-fA-F]{6}$/.test(c) ? c 
 
 let erro = '';
 let ok = false;
+let msgEmailTeste = '';
+let emailTesteOk = false;
 
 let emp = await db()
   .prepare(
@@ -38,7 +41,11 @@ let emp = await db()
             nupay_merchant_token,
             COALESCE(infinitepay_ativo, 0) AS infinitepay_ativo,
             infinitepay_handle,
-            infinitepay_api_key
+            infinitepay_api_key,
+            COALESCE(email_notificacoes_ativo, 1) AS email_notificacoes_ativo,
+            resend_api_key,
+            COALESCE(NULLIF(email_remetente, ''), 'onboarding@resend.dev') AS email_remetente,
+            email_webhook_url
        FROM empresas WHERE id = ?`,
   )
   .bind(u.empresaId)
@@ -94,6 +101,10 @@ if (Astro.request.method === 'POST') {
   const infinitepayAtivo = f.get('infinitepay_ativo') ? 1 : 0;
   const infinitepayHandle = normalizarHandleInfinitePay(str(f, 'infinitepay_handle', 80));
   const infinitepayApiKey = str(f, 'infinitepay_api_key', 240);
+  const emailNotificacoesAtivo = f.get('email_notificacoes_ativo') ? 1 : 0;
+  const resendApiKey = str(f, 'resend_api_key', 240);
+  const emailRemetente = str(f, 'email_remetente', 140) || 'onboarding@resend.dev';
+  const emailWebhookUrl = str(f, 'email_webhook_url', 400);
 
   if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
     erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
@@ -111,7 +122,8 @@ if (Astro.request.method === 'POST') {
                 nubank_pix_ativo = ?, nubank_link_ativo = ?,
                 nubank_chave_pix = ?, nubank_cidade_pix = ?, nubank_link_padrao = ?,
                 nupay_merchant_key = ?, nupay_merchant_token = ?,
-                infinitepay_ativo = ?, infinitepay_handle = ?, infinitepay_api_key = ?
+                infinitepay_ativo = ?, infinitepay_handle = ?, infinitepay_api_key = ?,
+                email_notificacoes_ativo = ?, resend_api_key = ?, email_remetente = ?, email_webhook_url = ?
           WHERE id = ?`,
       )
       .bind(
@@ -155,6 +167,10 @@ if (Astro.request.method === 'POST') {
         infinitepayAtivo,
         infinitepayHandle || null,
         infinitepayApiKey || null,
+        emailNotificacoesAtivo,
+        resendApiKey || null,
+        emailRemetente,
+        emailWebhookUrl || null,
         u.empresaId,
       )
       .run();
@@ -200,8 +216,25 @@ if (Astro.request.method === 'POST') {
       infinitepay_ativo: infinitepayAtivo,
       infinitepay_handle: infinitepayHandle,
       infinitepay_api_key: infinitepayApiKey,
+      email_notificacoes_ativo: emailNotificacoesAtivo,
+      resend_api_key: resendApiKey,
+      email_remetente: emailRemetente,
+      email_webhook_url: emailWebhookUrl,
     };
     ok = true;
+
+    if (f.get('testar_email_resend') === '1') {
+      const destTeste = str(f, 'email_destino_teste', 140) || rodapeEmail;
+      const resTeste = await enviarEmailTesteConfiguracao({
+        empresaNome: lojaNome || emp.nome_fantasia || emp.razao_social,
+        destinatario: destTeste,
+        resendApiKey,
+        emailRemetente,
+        emailWebhookUrl,
+      });
+      emailTesteOk = resTeste.ok;
+      msgEmailTeste = resTeste.mensagem;
+    }
   }
 }
 
@@ -216,6 +249,7 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   </div>
   {erro && <div class="msg err">{erro}</div>}
   {ok && <div class="msg ok">Personalização da loja salva com sucesso!</div>}
+  {msgEmailTeste && <div class={`msg ${emailTesteOk ? 'ok' : 'err'}`}>{msgEmailTeste}</div>}
 
   <form method="post" id="form-loja">
     <div class="card">
@@ -531,6 +565,88 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           />
           <small class="muted" style="display:block;margin-top:3px">
             Enviada automaticamente no checkout para confirmar o pagamento do pedido.
+          </small>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="border-left:4px solid #2563eb">
+      <h2 style="color:#1d4ed8">✉️ Notificações de E-mail para Clientes (Resend / Webhook)</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Configure sua chave do <a href="https://resend.com/api-keys" target="_blank" rel="noopener"><strong>Resend.com</strong></a> (gratuito até 3.000 e-mails/mês) para disparar automaticamente os e-mails de atualização de status dos pedidos diretamente para a caixa de entrada dos clientes.
+      </p>
+      <div class="grid">
+        <div class="c12">
+          <label class="check" style="font-size:14.5px;font-weight:700;color:#1e3a8a;padding:10px 12px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px">
+            <input
+              type="checkbox"
+              name="email_notificacoes_ativo"
+              value="1"
+              checked={(emp.email_notificacoes_ativo ?? 1) === 1}
+            />
+            Enviar e-mail automático ao cliente quando a situação do pedido for atualizada
+          </label>
+        </div>
+
+        <div class="c4">
+          <label>Chave de API do Resend (<code>RESEND_API_KEY</code>)</label>
+          <input
+            type="password"
+            name="resend_api_key"
+            value={emp.resend_api_key ?? ''}
+            placeholder="Ex: re_123456789..."
+          />
+          <small class="muted" style="display:block;margin-top:3px">
+            Crie em <code>resend.com → API Keys → Create API Key</code>.
+          </small>
+        </div>
+
+        <div class="c4">
+          <label>E-mail Remetente (<code>From</code>)</label>
+          <input
+            name="email_remetente"
+            value={emp.email_remetente || 'onboarding@resend.dev'}
+            placeholder="onboarding@resend.dev ou contato@seudominio.com.br"
+          />
+          <small class="muted" style="display:block;margin-top:3px">
+            Use <code>onboarding@resend.dev</code> para testes imediatos ou um e-mail do seu domínio verificado no Resend.
+          </small>
+        </div>
+
+        <div class="c4">
+          <label>URL de Webhook de E-mail alternativo (opcional)</label>
+          <input
+            name="email_webhook_url"
+            value={emp.email_webhook_url ?? ''}
+            placeholder="https://... (n8n, Make, Zapier)"
+          />
+          <small class="muted" style="display:block;margin-top:3px">
+            Usado apenas se você não utilizar a chave do Resend.
+          </small>
+        </div>
+
+        <div class="c12" style="padding:12px 14px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px">
+          <label style="margin-bottom:6px">📨 Testar envio de e-mail agora</label>
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <input
+              type="email"
+              name="email_destino_teste"
+              value={emp.rodape_email || 'vanderlucioevaristo@gmail.com'}
+              placeholder="Digite o e-mail que receberá o teste..."
+              style="max-width:340px"
+            />
+            <button
+              type="submit"
+              name="testar_email_resend"
+              value="1"
+              class="sec"
+              style="border-color:#2563eb;color:#1d4ed8;font-weight:700"
+            >
+              📨 Salvar e Enviar E-mail de Teste
+            </button>
+          </div>
+          <small class="muted" style="display:block;margin-top:5px">
+            Nota: No modo gratuito de avaliação do Resend (usando <code>onboarding@resend.dev</code> sem domínio próprio verificado), o Resend envia e-mails de teste para o mesmo endereço de e-mail da sua conta Resend. Após cadastrar seu domínio no Resend, ele envia para qualquer cliente.
           </small>
         </div>
       </div>

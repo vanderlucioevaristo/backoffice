@@ -359,6 +359,10 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE loja_pedidos ADD COLUMN infinitepay_link_pagamento TEXT",
       "ALTER TABLE loja_pedidos ADD COLUMN infinitepay_slug TEXT",
       "ALTER TABLE loja_pedidos ADD COLUMN infinitepay_transaction_nsu TEXT",
+      "ALTER TABLE empresas ADD COLUMN email_notificacoes_ativo INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE empresas ADD COLUMN resend_api_key TEXT",
+      "ALTER TABLE empresas ADD COLUMN email_remetente TEXT DEFAULT 'onboarding@resend.dev'",
+      "ALTER TABLE empresas ADD COLUMN email_webhook_url TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});

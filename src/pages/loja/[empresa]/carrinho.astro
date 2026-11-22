@@ -142,9 +142,31 @@ if (Astro.request.method === 'POST') {
 
     if (!erro) {
       if (empresa.frete_provedor === 'CEPCERTO') {
-        valorFrete = Math.max(0, parseNum(f.get('valor_frete_cepcerto'), 0));
         freteModalidade = str(f, 'frete_modalidade_cepcerto', 80) || 'Frete CEP Certo';
         fretePrazoDias = Math.max(1, Number(f.get('frete_prazo_cepcerto')) || 5);
+        const ehRetirada = /retirada/i.test(freteModalidade);
+        if (!ehRetirada && !/^\d{8}$/.test(cepEntrega)) {
+          erro = 'Informe um CEP de entrega válido (8 dígitos) para cotar o frete.';
+        } else if (ehRetirada) {
+          valorFrete = 0;
+        } else {
+          const valInformado = Math.max(0, Math.round(parseNum(f.get('valor_frete_cepcerto'), 0) * 100) / 100);
+          // Calcula piso mínimo via tabela base dos Correios caso o campo tenha sido manipulado para zero no navegador
+          const cotSeguranca = calcularFreteCorreios({
+            cepOrigem: empresa.cep_origem || '01001000',
+            cepDestino: cepEntrega,
+            itens: cartItens.map((it) => ({
+              quantidade: it.quantidade,
+              pesoKg: it.peso_kg,
+              comprimentoCm: it.comprimento_cm,
+              larguraCm: it.largura_cm,
+              alturaCm: it.altura_cm,
+              precoUnitario: it.preco_venda,
+            })),
+          });
+          const pisoPac = cotSeguranca.ok ? cotSeguranca.opcoes.find((o) => o.codigo === 'PAC')?.valor ?? 0 : 0;
+          valorFrete = valInformado > 0 ? valInformado : pisoPac;
+        }
       } else if (modalidadeCodigo !== 'RETIRADA') {
         if (!/^\d{8}$/.test(cepEntrega)) {
           erro = 'Informe o CEP de entrega (8 dígitos) para calcular o frete via Correios ou escolha "Retirada na Loja".';

@@ -2,7 +2,11 @@
 import Layout from '../layouts/Layout.astro';
 import { db } from '../lib/auth';
 import { enviarEmailTesteConfiguracao } from '../lib/email';
-import { DIAS_SEMANA_LABELS, normalizarHandleInfinitePay } from '../lib/empresa-service';
+import {
+  DIAS_SEMANA_LABELS,
+  normalizarHandleInfinitePay,
+  validarUrlExternaSegura,
+} from '../lib/empresa-service';
 import { onlyDigits, str } from '../lib/validate';
 
 const u = Astro.locals.user!;
@@ -106,8 +110,16 @@ if (Astro.request.method === 'POST') {
   const emailRemetente = str(f, 'email_remetente', 140) || 'onboarding@resend.dev';
   const emailWebhookUrl = str(f, 'email_webhook_url', 400);
 
-  if (lojaLogo && !/^(https?:\/\/|data:image\/)/i.test(lojaLogo)) {
-    erro = 'A logo deve ser uma URL válida (http/https) ou uma imagem enviada do seu computador.';
+  if (
+    lojaLogo &&
+    !/^(https:\/\/|data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$)/i.test(lojaLogo)
+  ) {
+    erro =
+      'A logo deve ser uma URL segura (https://...) ou uma imagem PNG/JPG/WebP enviada do seu computador.';
+  } else if (!validarUrlExternaSegura(nubankLinkPadrao)) {
+    erro = 'O Link de Cobrança Nubank padrão deve ser uma URL https:// externa válida.';
+  } else if (!validarUrlExternaSegura(emailWebhookUrl)) {
+    erro = 'A URL de Webhook de E-mail deve usar protocolo seguro https:// para um domínio público válido.';
   } else {
     await db()
       .prepare(

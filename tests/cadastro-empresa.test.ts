@@ -20,6 +20,11 @@ import {
   gerarPayloadPixNubank,
   gerarUrlLinkIntegradoInfinitePay,
   normalizarHandleInfinitePay,
+  verificarPagamentoInfinitePay,
+  verificarRateLimitTentativas,
+  registrarFalhaTentativa,
+  limparTentativasLogin,
+  validarUrlExternaSegura,
   gerarManifestoPwaLoja,
   IDLE_TIMEOUT_SEC,
   IDLE_TIMEOUT_MS,
@@ -555,5 +560,47 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(res.itemsPayload[2].quantity, 1);
     assert.ok(res.url && res.url.startsWith('https://checkout.infinitepay.io/vanderltda?'));
     assert.ok(res.url!.includes('order_nsu=PED-99'));
+  });
+
+  test('segurança: bloqueia força bruta após 5 tentativas falhas, impede bypass de pagamento sem confirmação da API e bloqueia SSRF', async () => {
+    const chave = 'bo:lojateste:admin:127.0.0.1';
+    const baseNow = Date.now();
+
+    for (let i = 1; i <= 4; i++) {
+      const f = await registrarFalhaTentativa(ctx.d1, chave, baseNow);
+      assert.equal(f.bloqueado, false);
+      const check = await verificarRateLimitTentativas(ctx.d1, chave, baseNow);
+      assert.equal(check.permitido, true);
+    }
+
+    // 5ª tentativa falha deve acionar bloqueio por 15 minutos
+    const f5 = await registrarFalhaTentativa(ctx.d1, chave, baseNow);
+    assert.equal(f5.bloqueado, true);
+
+    const bloqueadoAgora = await verificarRateLimitTentativas(ctx.d1, chave, baseNow + 60_000);
+    assert.equal(bloqueadoAgora.permitido, false);
+    assert.ok((bloqueadoAgora.minutosRestantes ?? 0) >= 14);
+
+    // Após limpar tentativas no login bem-sucedido, libera imediatamente
+    await limparTentativasLogin(ctx.d1, chave);
+    const aposLimpar = await verificarRateLimitTentativas(ctx.d1, chave, baseNow + 60_000);
+    assert.equal(aposLimpar.permitido, true);
+
+    // Anti-bypass InfinitePay: nunca deve aprovar pagamento apenas por passar transaction_nsu na URL se a API oficial não confirmar
+    const checkFalso = await verificarPagamentoInfinitePay({
+      handle: 'vanderltda',
+      orderNsu: 'PED-999',
+      transactionNsu: 'tx-forjado-pelo-cliente',
+      slug: 'slug-forjado',
+    });
+    assert.equal(checkFalso.pago, false);
+    assert.equal(checkFalso.confirmadoApi, false);
+
+    // Anti-SSRF e XSS em URLs externas configuráveis
+    assert.equal(validarUrlExternaSegura('https://hooks.zapier.com/hooks/catch/123/abc'), true);
+    assert.equal(validarUrlExternaSegura('http://127.0.0.1:8080/admin'), false);
+    assert.equal(validarUrlExternaSegura('https://169.254.169.254/latest/meta-data/'), false);
+    assert.equal(validarUrlExternaSegura('https://localhost/webhook'), false);
+    assert.equal(validarUrlExternaSegura('javascript:alert(1)'), false);
   });
 });

@@ -9,6 +9,11 @@ import {
   DUMMY_HASH,
   CLIENT_SESSION_COOKIE,
 } from '../../../lib/auth';
+import {
+  verificarRateLimitTentativas,
+  registrarFalhaTentativa,
+  limparTentativasLogin,
+} from '../../../lib/empresa-service';
 import { cleanDoc } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -31,35 +36,48 @@ if (Astro.request.method === 'POST') {
   const senha = String(f.get('senha') ?? '');
   const digits = cleanDoc(ident);
 
-  const parceiro = await db()
-    .prepare(
-      `SELECT id, senha_hash, eh_cliente, ativo
-         FROM parceiros
-        WHERE empresa_id = ?
-          AND ((documento IS NOT NULL AND documento <> '' AND documento = ?)
-            OR (email IS NOT NULL AND email <> '' AND lower(email) = ?))
-        LIMIT 1`,
-    )
-    .bind(empresa.id, digits || '__none__', ident.toLowerCase())
-    .first<{ id: number; senha_hash: string | null; eh_cliente: number; ativo: number }>();
+  const ip =
+    Astro.request.headers.get('cf-connecting-ip') ||
+    Astro.request.headers.get('x-forwarded-for') ||
+    'local';
+  const rateKey = `loja:${empCodigo}:${ident.toLowerCase()}:${ip}`;
+  const rl = await verificarRateLimitTentativas(db(), rateKey);
 
-  if (parceiro && !parceiro.senha_hash) {
-    erro = 'Você já possui ficha em nossa loja, mas ainda não definiu uma senha. Clique em "Criar minha conta" abaixo informando seu CPF/CNPJ para ativar o acesso.';
+  if (!rl.permitido) {
+    erro = `Muitas tentativas de login malsucedidas. Aguarde ${rl.minutosRestantes} minuto(s) para tentar novamente.`;
   } else {
-    const ok = parceiro?.senha_hash ? await verifyPassword(senha, parceiro.senha_hash) : await verifyPassword(senha, DUMMY_HASH);
-    if (parceiro && parceiro.ativo === 1 && parceiro.eh_cliente === 1 && parceiro.senha_hash && ok) {
-      const s = await createClientSession(parceiro.id, empresa.id);
-      await db().prepare('DELETE FROM sessoes_clientes WHERE expira_em < ?').bind(new Date().toISOString()).run();
-      Astro.cookies.set(CLIENT_SESSION_COOKIE, s.token, {
-        httpOnly: true,
-        secure: import.meta.env.PROD,
-        sameSite: 'lax',
-        path: '/',
-        maxAge: s.maxAge,
-      });
-      return Astro.redirect(`/loja/${empCodigo}`);
+    const parceiro = await db()
+      .prepare(
+        `SELECT id, senha_hash, eh_cliente, ativo
+           FROM parceiros
+          WHERE empresa_id = ?
+            AND ((documento IS NOT NULL AND documento <> '' AND documento = ?)
+              OR (email IS NOT NULL AND email <> '' AND lower(email) = ?))
+          LIMIT 1`,
+      )
+      .bind(empresa.id, digits || '__none__', ident.toLowerCase())
+      .first<{ id: number; senha_hash: string | null; eh_cliente: number; ativo: number }>();
+
+    if (parceiro && !parceiro.senha_hash) {
+      erro = 'Você já possui ficha em nossa loja, mas ainda não definiu uma senha. Clique em "Criar minha conta" abaixo informando seu CPF/CNPJ para ativar o acesso.';
+    } else {
+      const ok = parceiro?.senha_hash ? await verifyPassword(senha, parceiro.senha_hash) : await verifyPassword(senha, DUMMY_HASH);
+      if (parceiro && parceiro.ativo === 1 && parceiro.eh_cliente === 1 && parceiro.senha_hash && ok) {
+        await limparTentativasLogin(db(), rateKey);
+        const s = await createClientSession(parceiro.id, empresa.id);
+        await db().prepare('DELETE FROM sessoes_clientes WHERE expira_em < ?').bind(new Date().toISOString()).run();
+        Astro.cookies.set(CLIENT_SESSION_COOKIE, s.token, {
+          httpOnly: true,
+          secure: import.meta.env.PROD,
+          sameSite: 'lax',
+          path: '/',
+          maxAge: s.maxAge,
+        });
+        return Astro.redirect(`/loja/${empCodigo}`);
+      }
+      await registrarFalhaTentativa(db(), rateKey);
+      erro = 'CPF/CNPJ, e-mail ou senha inválidos.';
     }
-    erro = 'CPF/CNPJ, e-mail ou senha inválidos.';
   }
 }
 ---

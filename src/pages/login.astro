@@ -1,6 +1,11 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { db, verifyPassword, createSession, DUMMY_HASH, SESSION_COOKIE } from '../lib/auth';
+import {
+  verificarRateLimitTentativas,
+  registrarFalhaTentativa,
+  limparTentativasLogin,
+} from '../lib/empresa-service';
 
 if (Astro.locals.user) return Astro.redirect('/');
 
@@ -15,25 +20,38 @@ if (Astro.request.method === 'POST') {
   login = String(f.get('login') ?? '').trim().toLowerCase();
   const senha = String(f.get('senha') ?? '');
 
-  const u = await db()
-    .prepare(
-      `SELECT u.id, u.empresa_id, u.senha_hash FROM usuarios u
-         JOIN empresas e ON e.id = u.empresa_id
-        WHERE e.codigo = ? AND u.login = ? AND u.ativo = 1 AND e.ativa = 1`,
-    )
-    .bind(empresa, login)
-    .first<{ id: number; empresa_id: number; senha_hash: string }>();
-  const ok = await verifyPassword(senha, u?.senha_hash ?? DUMMY_HASH);
-  if (u && ok) {
-    const s = await createSession(u.id, u.empresa_id);
-    await db().prepare("UPDATE usuarios SET ultimo_acesso = datetime('now') WHERE id = ? AND empresa_id = ?").bind(u.id, u.empresa_id).run();
-    await db().prepare('DELETE FROM sessoes WHERE expira_em < ?').bind(new Date().toISOString()).run();
-    Astro.cookies.set(SESSION_COOKIE, s.token, {
-      httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', path: '/', maxAge: s.maxAge,
-    });
-    return Astro.redirect('/');
+  const ip =
+    Astro.request.headers.get('cf-connecting-ip') ||
+    Astro.request.headers.get('x-forwarded-for') ||
+    'local';
+  const rateKey = `bo:${empresa}:${login}:${ip}`;
+  const rl = await verificarRateLimitTentativas(db(), rateKey);
+
+  if (!rl.permitido) {
+    erro = `Muitas tentativas de login malsucedidas. Aguarde ${rl.minutosRestantes} minuto(s) para tentar novamente.`;
+  } else {
+    const u = await db()
+      .prepare(
+        `SELECT u.id, u.empresa_id, u.senha_hash FROM usuarios u
+           JOIN empresas e ON e.id = u.empresa_id
+          WHERE e.codigo = ? AND u.login = ? AND u.ativo = 1 AND e.ativa = 1`,
+      )
+      .bind(empresa, login)
+      .first<{ id: number; empresa_id: number; senha_hash: string }>();
+    const ok = await verifyPassword(senha, u?.senha_hash ?? DUMMY_HASH);
+    if (u && ok) {
+      await limparTentativasLogin(db(), rateKey);
+      const s = await createSession(u.id, u.empresa_id);
+      await db().prepare("UPDATE usuarios SET ultimo_acesso = datetime('now') WHERE id = ? AND empresa_id = ?").bind(u.id, u.empresa_id).run();
+      await db().prepare('DELETE FROM sessoes WHERE expira_em < ?').bind(new Date().toISOString()).run();
+      Astro.cookies.set(SESSION_COOKIE, s.token, {
+        httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', path: '/', maxAge: s.maxAge,
+      });
+      return Astro.redirect('/');
+    }
+    await registrarFalhaTentativa(db(), rateKey);
+    erro = 'Empresa, usuário ou senha inválidos.';
   }
-  erro = 'Empresa, usuário ou senha inválidos.';
 }
 ---
 <Layout title="Entrar" bare>

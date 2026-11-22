@@ -1260,11 +1260,108 @@ export async function verificarPagamentoInfinitePay(params: {
         }
       }
     } catch {
-      // Se offline, usa confirmação pelos parâmetros de callback
+      // Se offline, nunca aprova pagamento sem confirmação criptográfica/API da InfinitePay
     }
   }
 
-  return { pago: Boolean(txNsu), confirmadoApi: false };
+  return { pago: false, confirmadoApi: false };
+}
+
+export const MAX_LOGIN_FALHAS = 5;
+export const BLOQUEIO_LOGIN_MS = 15 * 60 * 1000; // 15 minutos
+
+export async function verificarRateLimitTentativas(
+  database: any,
+  chave: string,
+  nowMs = Date.now(),
+): Promise<{ permitido: boolean; minutosRestantes?: number }> {
+  try {
+    const row = await database
+      .prepare('SELECT falhas, bloqueado_ate FROM login_tentativas WHERE chave = ?')
+      .bind(chave)
+      .first();
+    if (!row || !row.bloqueado_ate) return { permitido: true };
+    const ateMs = Date.parse(String(row.bloqueado_ate));
+    if (Number.isFinite(ateMs) && ateMs > nowMs) {
+      const min = Math.max(1, Math.ceil((ateMs - nowMs) / 60000));
+      return { permitido: false, minutosRestantes: min };
+    }
+  } catch {
+    // Tabela opcional em bancos antigos
+  }
+  return { permitido: true };
+}
+
+export async function registrarFalhaTentativa(
+  database: any,
+  chave: string,
+  nowMs = Date.now(),
+): Promise<{ bloqueado: boolean; falhas: number }> {
+  try {
+    const row = await database
+      .prepare('SELECT falhas, bloqueado_ate FROM login_tentativas WHERE chave = ?')
+      .bind(chave)
+      .first();
+    const novasFalhas = Number(row?.falhas ?? 0) + 1;
+    const bloqueado = novasFalhas >= MAX_LOGIN_FALHAS;
+    const bloqueadoAte = bloqueado ? new Date(nowMs + BLOQUEIO_LOGIN_MS).toISOString() : null;
+    const agoraIso = new Date(nowMs).toISOString();
+
+    await database
+      .prepare(
+        `INSERT INTO login_tentativas (chave, falhas, bloqueado_ate, atualizado_em)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(chave) DO UPDATE SET
+           falhas = excluded.falhas,
+           bloqueado_ate = COALESCE(excluded.bloqueado_ate, login_tentativas.bloqueado_ate),
+           atualizado_em = excluded.atualizado_em`,
+      )
+      .bind(chave, novasFalhas, bloqueadoAte, agoraIso)
+      .run();
+
+    return { bloqueado, falhas: novasFalhas };
+  } catch {
+    return { bloqueado: false, falhas: 1 };
+  }
+}
+
+export async function limparTentativasLogin(database: any, chave: string): Promise<void> {
+  try {
+    await database.prepare('DELETE FROM login_tentativas WHERE chave = ?').bind(chave).run();
+  } catch {
+    // Ignora se tabela não existir
+  }
+}
+
+/**
+ * Valida se uma URL externa configurada pelo lojista (ex: Webhook de e-mail ou Link de pagamento)
+ * usa protocolo seguro https:// e não aponta para IPs privados/loopback (proteção anti-SSRF).
+ */
+export function validarUrlExternaSegura(urlRaw?: string | null): boolean {
+  const raw = String(urlRaw ?? '').trim();
+  if (!raw) return true;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    if (
+      h === 'localhost' ||
+      h === '0.0.0.0' ||
+      h.endsWith('.local') ||
+      h.endsWith('.internal') ||
+      /^127\./.test(h) ||
+      /^10\./.test(h) ||
+      /^192\.168\./.test(h) ||
+      /^169\.254\./.test(h) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(h) ||
+      h === '[::1]'
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function gerarManifestoPwaLoja(empresa: {

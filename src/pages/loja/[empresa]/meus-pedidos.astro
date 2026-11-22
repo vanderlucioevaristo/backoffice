@@ -42,7 +42,7 @@ if (infPedidoId > 0 && (infTxNsu || infSlug)) {
     transactionNsu: infTxNsu,
     slug: infSlug,
   });
-  if (check.pago) {
+  if (check.pago && check.confirmadoApi) {
     await db()
       .prepare(
         `UPDATE loja_pedidos

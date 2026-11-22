@@ -1,6 +1,11 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { db, hashPassword } from '../lib/auth';
+import { db, hashPassword, verifyPassword, DUMMY_HASH } from '../lib/auth';
+import {
+  verificarRateLimitTentativas,
+  registrarFalhaTentativa,
+  limparTentativasLogin,
+} from '../lib/empresa-service';
 import { onlyDigits, str } from '../lib/validate';
 
 if (Astro.locals.user) return Astro.redirect('/');
@@ -9,18 +14,29 @@ let erro = '';
 let ok = false;
 let empresa = '';
 let login = '';
-let verificador = '';
+let emailInformado = '';
+let cpfInformado = '';
 
 if (Astro.request.method === 'POST') {
   const f = await Astro.request.formData();
   empresa = str(f, 'empresa', 40).toLowerCase();
   login = str(f, 'login', 40).toLowerCase();
-  verificador = str(f, 'verificador', 120);
+  emailInformado = str(f, 'email', 120).toLowerCase();
+  cpfInformado = onlyDigits(str(f, 'cpf', 20));
   const nova = String(f.get('nova_senha') ?? '');
   const conf = String(f.get('confirmar_senha') ?? '');
 
-  if (!empresa || !login || !verificador) {
-    erro = 'Preencha todos os campos de identificação.';
+  const ip =
+    Astro.request.headers.get('cf-connecting-ip') ||
+    Astro.request.headers.get('x-forwarded-for') ||
+    'local';
+  const rateKey = `rec:${empresa}:${login}:${ip}`;
+  const rl = await verificarRateLimitTentativas(db(), rateKey);
+
+  if (!rl.permitido) {
+    erro = `Muitas tentativas malsucedidas. Aguarde ${rl.minutosRestantes} minuto(s) antes de tentar novamente.`;
+  } else if (!empresa || !login || !emailInformado || cpfInformado.length !== 11) {
+    erro = 'Preencha o código da empresa, usuário, seu e-mail pessoal e seu CPF (11 dígitos).';
   } else if (nova.length < 8) {
     erro = 'A nova senha deve ter pelo menos 8 caracteres.';
   } else if (nova !== conf) {
@@ -28,24 +44,25 @@ if (Astro.request.method === 'POST') {
   } else {
     const row = await db()
       .prepare(
-        `SELECT u.id, u.empresa_id, u.email, u.cpf, e.cnpj AS empresa_cnpj
+        `SELECT u.id, u.empresa_id, u.email, u.cpf
            FROM usuarios u
            JOIN empresas e ON e.id = u.empresa_id
           WHERE e.codigo = ? AND u.login = ? AND u.ativo = 1 AND e.ativa = 1`,
       )
       .bind(empresa, login)
-      .first<{ id: number; empresa_id: number; email: string | null; cpf: string | null; empresa_cnpj: string | null }>();
+      .first<{ id: number; empresa_id: number; email: string | null; cpf: string | null }>();
 
-    const verDigits = onlyDigits(verificador);
-    const verLower = verificador.toLowerCase();
+    // Exige simultaneamente o E-mail pessoal E o CPF pessoal cadastrados no usuário (nunca aceita CNPJ público da empresa)
+    const bateEmail = !!(row?.email && row.email.trim().toLowerCase() === emailInformado);
+    const bateCpf = !!(row?.cpf && onlyDigits(row.cpf) === cpfInformado && cpfInformado.length === 11);
 
-    const bateEmail = !!(row?.email && row.email.toLowerCase() === verLower);
-    const bateCpf = !!(row?.cpf && verDigits.length === 11 && row.cpf === verDigits);
-    const bateCnpj = !!(row?.empresa_cnpj && verDigits.length === 14 && row.empresa_cnpj === verDigits);
-
-    if (!row || (!bateEmail && !bateCpf && !bateCnpj)) {
-      erro = 'Dados de verificação não conferem com o cadastro. Se não tiver e-mail ou CPF cadastrado, solicite a redefinição ao Administrador da sua empresa.';
+    if (!row || !bateEmail || !bateCpf) {
+      await verifyPassword(nova, DUMMY_HASH);
+      await registrarFalhaTentativa(db(), rateKey);
+      erro =
+        'Dados de verificação não conferem. Para redefinir por autoatendimento é obrigatório ter E-mail e CPF cadastrados no seu usuário; caso contrário, solicite ao Administrador.';
     } else {
+      await limparTentativasLogin(db(), rateKey);
       await db()
         .prepare("UPDATE usuarios SET senha_hash = ?, atualizado_em = datetime('now') WHERE id = ? AND empresa_id = ?")
         .bind(await hashPassword(nova), row.id, row.empresa_id)
@@ -60,7 +77,7 @@ if (Astro.request.method === 'POST') {
   <form method="post" class="card" style="max-width:440px">
     <h1>Recuperar senha</h1>
     <p class="muted" style="margin-top:0;font-size:13px">
-      Informe o código da empresa, seu usuário e um dado cadastrado (seu E-mail, seu CPF ou o CNPJ da empresa) para definir uma nova senha.
+      Informe o código da empresa, seu usuário e confirme <strong>seu E-mail e seu CPF pessoal</strong> cadastrados para definir uma nova senha.
     </p>
     {erro && <div class="msg err">{erro}</div>}
     {ok ? (
@@ -72,7 +89,8 @@ if (Astro.request.method === 'POST') {
       <>
         <p><label>Empresa (código) *</label><input name="empresa" value={empresa} required autofocus /></p>
         <p><label>Usuário (login) *</label><input name="login" value={login} required /></p>
-        <p><label>Seu E-mail, seu CPF ou CNPJ da empresa *</label><input name="verificador" value={verificador} required placeholder="Informe um dos dados do seu cadastro" /></p>
+        <p><label>Seu E-mail cadastrado *</label><input name="email" type="email" value={emailInformado} required placeholder="seu@email.com" /></p>
+        <p><label>Seu CPF cadastrado (11 dígitos) *</label><input name="cpf" value={cpfInformado} required inputmode="numeric" maxlength="14" placeholder="000.000.000-00" /></p>
         <p><label>Nova senha * (mín. 8 caracteres)</label><input name="nova_senha" type="password" minlength="8" required autocomplete="new-password" /></p>
         <p><label>Confirmar nova senha *</label><input name="confirmar_senha" type="password" minlength="8" required autocomplete="new-password" /></p>
         <button style="width:100%">Redefinir senha</button>

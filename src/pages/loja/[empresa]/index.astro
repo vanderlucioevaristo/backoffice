@@ -1,7 +1,7 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
-import { calcularFreteCorreios } from '../../../lib/empresa-service';
+import { calcularFreteCorreios, iconeCategoriaLoja } from '../../../lib/empresa-service';
 import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, onlyDigits, parseNum } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -359,13 +359,19 @@ const baseUrl = `/loja/${empCodigo}`;
   )}
 
   <div class="ml-cat-bar">
-    <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>Todas </a>
+    <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>
+      <span class="cat-chip-ico" aria-hidden="true">{iconeCategoriaLoja('Todas')}</span>
+      <span class="cat-chip-lbl">Todas</span>
+    </a>
     {categoriasRows.map((c) => (
       <a
         href={`${baseUrl}?cat=${encodeURIComponent(c.categoria)}`}
         class={`ml-cat-chip ${cat === c.categoria ? 'on' : ''}`}
       >
-        {c.categoria} ({c.qtd})
+        <span class="cat-chip-ico" aria-hidden="true">{iconeCategoriaLoja(c.categoria)}</span>
+        <span class="cat-chip-lbl">
+          {c.categoria} <span class="cat-chip-qtd">({c.qtd})</span>
+        </span>
       </a>
     ))}
   </div>

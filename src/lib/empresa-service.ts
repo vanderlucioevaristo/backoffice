@@ -1364,6 +1364,38 @@ export function validarUrlExternaSegura(urlRaw?: string | null): boolean {
   }
 }
 
+/**
+ * Retorna um ícone representativo para cada categoria de produto da loja virtual.
+ */
+export function iconeCategoriaLoja(categoriaRaw?: string | null): string {
+  const c = String(categoriaRaw ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+  if (!c || c === 'todas' || c === 'todas as categorias') return '🛍️';
+  if (c.includes('celular') || c.includes('smartphone') || c.includes('telefon')) return '📱';
+  if (c.includes('informatica') || c.includes('computador') || c.includes('notebook') || c.includes('pc')) return '💻';
+  if (c.includes('audio') || c.includes('som') || c.includes('fone') || c.includes('musica')) return '🎧';
+  if (c.includes('eletro') || c.includes('cozinha') || c.includes('cafe')) return '☕';
+  if (c.includes('casa') || c.includes('iluminacao') || c.includes('decoracao') || c.includes('moveis')) return '🏠';
+  if (c.includes('ferramenta') || c.includes('construcao') || c.includes('oficina')) return '🛠️';
+  if (c.includes('esporte') || c.includes('lazer') || c.includes('fitness') || c.includes('academia')) return '🏃';
+  if (c.includes('camera') || c.includes('seguranca') || c.includes('foto') || c.includes('video')) return '📷';
+  if (c.includes('acessorio') || c.includes('relogio') || c.includes('smartwatch')) return '⌚';
+  if (c.includes('game') || c.includes('jogo') || c.includes('console')) return '🎮';
+  if (c.includes('moda') || c.includes('roupa') || c.includes('vestuario') || c.includes('calcado')) return '👕';
+  if (c.includes('beleza') || c.includes('perfum') || c.includes('cosmetico')) return '💄';
+  if (c.includes('livro') || c.includes('papelaria') || c.includes('educacao')) return '📚';
+  if (c.includes('auto') || c.includes('carro') || c.includes('moto')) return '🚗';
+  if (c.includes('pet') || c.includes('animal')) return '🐾';
+  if (c.includes('alimento') || c.includes('bebida') || c.includes('mercado')) return '🛒';
+  if (c.includes('brinquedo') || c.includes('infantil') || c.includes('bebe')) return '🧸';
+  if (c.includes('saude') || c.includes('farmacia')) return '💊';
+  return '📦';
+}
+
 export function gerarManifestoPwaLoja(empresa: {
   codigo: string;
   nome: string;

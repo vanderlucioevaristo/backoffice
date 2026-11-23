@@ -120,6 +120,9 @@ if (!bare && user) {
             {user?.perfil === 'admin' && (
               <a href="/usuarios" class={active === 'usuarios' ? 'on' : ''}>Usuários</a>
             )}
+            {user?.perfil === 'admin' && (
+              <a href="/api-docs" class={active === 'swagger' ? 'on' : ''}>Swagger</a>
+            )}
           </nav>
           <div class="who">
             <a

@@ -1,0 +1,67 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Swagger / Documentação da API" active="swagger">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"
+  />
+  <style is:global>
+    .swagger-wrap {
+      background: #ffffff;
+      border: 1px solid var(--bd);
+      border-radius: 12px;
+      padding: 8px 12px 24px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    }
+    .swagger-ui .topbar {
+      display: none;
+    }
+    .swagger-ui .info {
+      margin: 18px 0;
+    }
+    /* Evita que os estilos globais de input/button do Backoffice desconfigurem os controles internos do Swagger UI */
+    .swagger-ui input,
+    .swagger-ui select,
+    .swagger-ui textarea {
+      width: auto;
+    }
+    .swagger-ui button {
+      background: initial;
+      color: initial;
+    }
+  </style>
+
+  <div class="row" style="margin-bottom:12px">
+    <div>
+      <h1 style="margin-bottom:2px">📘 Swagger UI — Documentação Interativa da API</h1>
+      <span class="muted" style="font-size:13px">
+        Explore e teste ao vivo (<strong>Try it out</strong>) os endpoints do Backoffice e da Loja Virtual.
+      </span>
+    </div>
+    <span class="spacer"></span>
+    <a class="btn sec sm" href="/api/openapi.json" target="_blank" rel="noopener">
+      📄 Ver JSON OpenAPI 3.0 (<code>/api/openapi.json</code>) ↗
+    </a>
+  </div>
+
+  <div class="swagger-wrap">
+    <div id="swagger-ui">Carregando documentação interativa Swagger UI...</div>
+  </div>
+
+  <script is:inline src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script is:inline>
+    window.addEventListener('load', function () {
+      if (window.SwaggerUIBundle) {
+        window.SwaggerUIBundle({
+          url: '/api/openapi.json',
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          docExpansion: 'list',
+          defaultModelsExpandDepth: 1,
+          displayRequestDuration: true,
+        });
+      }
+    });
+  </script>
+</Layout>

@@ -369,6 +369,7 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN resend_api_key TEXT",
       "ALTER TABLE empresas ADD COLUMN email_remetente TEXT DEFAULT 'onboarding@resend.dev'",
       "ALTER TABLE empresas ADD COLUMN email_webhook_url TEXT",
+      "ALTER TABLE empresas ADD COLUMN loja_topo_imagem TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -496,6 +497,7 @@ export type LojaEmpresa = {
   razao_social: string;
   cnpj: string | null;
   loja_logo: string | null;
+  loja_topo_imagem: string | null;
   cor_primaria: string;
   cor_secundaria: string;
   cor_fundo: string;
@@ -541,7 +543,7 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
     .prepare(
       `SELECT id, codigo, COALESCE(NULLIF(loja_nome,''), nome_fantasia, razao_social) AS nome,
               razao_social, cnpj,
-              loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
+              loja_logo, loja_topo_imagem, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
               rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
               rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
               rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto,

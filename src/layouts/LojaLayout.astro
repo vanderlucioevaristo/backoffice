@@ -85,12 +85,15 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         flex-direction: column;
       }
 
-      /* Cabeçalho estilo Mercado Livre */
+      /* Cabeçalho estilo Mercado Livre (suporta cor sólida ou imagem de fundo ocupando toda a barra) */
       .ml-header {
         position: sticky;
         top: 0;
         z-index: 90;
-        background: var(--topBg);
+        background-color: var(--topBg);
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
         color: var(--topTx);
         box-shadow: 0 2px 6px rgba(0,0,0,.12);
       }
@@ -1004,7 +1007,14 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         : IDLE_TIMEOUT_MS
     }
   >
-    <header class="ml-header">
+    <header
+      class="ml-header"
+      style={
+        empresa.loja_topo_imagem
+          ? `background-image:url('${empresa.loja_topo_imagem.replace(/'/g, "\\'")}');background-size:cover;background-position:center;background-repeat:no-repeat;`
+          : undefined
+      }
+    >
       <div class="ml-header-inner">
         <div class="ml-top-row">
           <a href={baseUrl} class="ml-brand">

@@ -91,7 +91,7 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     out.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     out.headers.set(
       'Content-Security-Policy',
-      "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' https://cepcerto.com; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+      "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' https://cepcerto.com https://unpkg.com; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
     );
     return out;
   } catch {

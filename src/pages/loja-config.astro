@@ -20,7 +20,7 @@ let emailTesteOk = false;
 let emp = await db()
   .prepare(
     `SELECT codigo, razao_social, nome_fantasia, cnpj,
-            loja_nome, loja_logo, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
+            loja_nome, loja_logo, loja_topo_imagem, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
             rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
             rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
             rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto,
@@ -64,6 +64,8 @@ if (Astro.request.method === 'POST') {
   const corTexto = validColor(str(f, 'cor_texto', 10), '#1c2430');
   let lojaLogo = str(f, 'loja_logo', 300_000); // aceita URL ou Data-URL (base64)
   if (f.get('remover_logo')) lojaLogo = '';
+  let lojaTopoImagem = str(f, 'loja_topo_imagem', 600_000); // aceita URL ou Data-URL (base64)
+  if (f.get('remover_topo_imagem')) lojaTopoImagem = '';
 
   const rodapeSobre = str(f, 'rodape_sobre', 600);
   const rodapeTelefone = str(f, 'rodape_telefone', 60);
@@ -116,6 +118,12 @@ if (Astro.request.method === 'POST') {
   ) {
     erro =
       'A logo deve ser uma URL segura (https://...) ou uma imagem PNG/JPG/WebP enviada do seu computador.';
+  } else if (
+    lojaTopoImagem &&
+    !/^(https:\/\/|data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$)/i.test(lojaTopoImagem)
+  ) {
+    erro =
+      'A imagem de fundo da barra de título deve ser uma URL segura (https://...) ou uma imagem PNG/JPG/WebP enviada do seu computador.';
   } else if (!validarUrlExternaSegura(nubankLinkPadrao)) {
     erro = 'O Link de Cobrança Nubank padrão deve ser uma URL https:// externa válida.';
   } else if (!validarUrlExternaSegura(emailWebhookUrl)) {
@@ -124,7 +132,7 @@ if (Astro.request.method === 'POST') {
     await db()
       .prepare(
         `UPDATE empresas
-            SET loja_nome = ?, loja_logo = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?,
+            SET loja_nome = ?, loja_logo = ?, loja_topo_imagem = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?,
                 rodape_sobre = ?, rodape_telefone = ?, rodape_whatsapp = ?, rodape_email = ?,
                 rodape_horario = ?, rodape_endereco = ?, rodape_suporte = ?, rodape_instagram = ?,
                 rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
@@ -141,6 +149,7 @@ if (Astro.request.method === 'POST') {
       .bind(
         lojaNome || null,
         lojaLogo || null,
+        lojaTopoImagem || null,
         corPrimaria,
         corSecundaria,
         corFundo,
@@ -190,6 +199,7 @@ if (Astro.request.method === 'POST') {
       ...emp,
       loja_nome: lojaNome,
       loja_logo: lojaLogo,
+      loja_topo_imagem: lojaTopoImagem,
       cor_primaria: corPrimaria,
       cor_secundaria: corSecundaria,
       cor_fundo: corFundo,
@@ -365,6 +375,24 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
             <label class="check"><input type="checkbox" name="remover_logo" value="1" /> Remover logo atual</label>
           </div>
         )}
+
+        <div class="c6">
+          <label>🖼️ Enviar imagem de fundo da barra de título (opcional — PNG, JPG ou WebP)</label>
+          <input type="file" id="inp-file-topo" accept="image/*" />
+          <small class="muted" style="display:block;margin-top:3px">
+            Se configurada, a imagem ocupará toda a barra superior da loja virtual.
+          </small>
+        </div>
+        <div class="c6">
+          <label>Ou informe a URL da imagem de fundo da barra de título (opcional)</label>
+          <input name="loja_topo_imagem" id="inp-topo-img" value={emp.loja_topo_imagem ?? ''} placeholder="https://... (deixe em branco para usar somente a cor)" />
+        </div>
+        {emp.loja_topo_imagem && (
+          <div class="c12">
+            <label class="check"><input type="checkbox" name="remover_topo_imagem" value="1" /> Remover imagem de fundo da barra de título atual</label>
+          </div>
+        )}
+
         <div class="c4">
           <label>⏱️ Tempo de queda do login por inatividade (minutos)</label>
           <input
@@ -883,7 +911,10 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
       </div>
       <div class="cfg-body" style="padding-top:14px">
       <div id="preview-box" style={`border:1px solid var(--bd);border-radius:10px;overflow:hidden;background:${emp.cor_fundo};color:${emp.cor_texto}`}>
-        <div id="prev-top" style={`display:flex;align-items:center;gap:14px;padding:12px 20px;background:${emp.cor_secundaria};color:#fff`}>
+        <div
+          id="prev-top"
+          style={`display:flex;align-items:center;gap:14px;padding:12px 20px;background-color:${emp.cor_secundaria};${emp.loja_topo_imagem ? `background-image:url('${emp.loja_topo_imagem}');background-size:cover;background-position:center;background-repeat:no-repeat;` : ''}color:#fff`}
+        >
           <img
             id="prev-logo"
             src={emp.loja_logo || ''}
@@ -991,6 +1022,8 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
 
   const inpFile = document.getElementById('inp-file-logo');
   const inpLogo = document.getElementById('inp-logo');
+  const inpFileTopo = document.getElementById('inp-file-topo');
+  const inpTopoImg = document.getElementById('inp-topo-img');
   const inpNome = document.getElementById('inp-nome');
   const inpCp = document.getElementById('inp-cp');
   const inpCs = document.getElementById('inp-cs');
@@ -1022,7 +1055,15 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   function syncPreview() {
     prevBox.style.background = inpCf.value;
     prevBox.style.color = inpCt.value;
-    prevTop.style.background = inpCs.value;
+    prevTop.style.backgroundColor = inpCs.value;
+    if (inpTopoImg && inpTopoImg.value.trim()) {
+      prevTop.style.backgroundImage = `url('${inpTopoImg.value.trim()}')`;
+      prevTop.style.backgroundSize = 'cover';
+      prevTop.style.backgroundPosition = 'center';
+      prevTop.style.backgroundRepeat = 'no-repeat';
+    } else {
+      prevTop.style.backgroundImage = 'none';
+    }
     prevBtn.style.background = inpCp.value;
     const nome = inpNome.value.trim() || inpNome.placeholder;
     prevNome.textContent = nome;
@@ -1045,7 +1086,7 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   }
 
   [
-    inpLogo, inpNome, inpCp, inpCs, inpCf, inpCt,
+    inpLogo, inpTopoImg, inpNome, inpCp, inpCs, inpCf, inpCt,
     inpRtel, inpRwhats, inpRemail, inpRhor, inpRsobre, inpRsup, inpRend, inpRcf, inpRct,
   ].forEach((el) => el && el.addEventListener('input', syncPreview));
 
@@ -1101,4 +1142,34 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
     };
     reader.readAsDataURL(file);
   });
+
+  // Converte imagem de fundo da barra de título selecionada para Data-URL panorâmica (até 1320x240)
+  if (inpFileTopo && inpTopoImg) {
+    inpFileTopo.addEventListener('change', () => {
+      const file = inpFileTopo.files && inpFileTopo.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 1320;
+          const maxH = 260;
+          let w = img.width;
+          let h = img.height;
+          const ratio = Math.min(maxW / w, maxH / h, 1);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          inpTopoImg.value = canvas.toDataURL('image/jpeg', 0.86);
+          syncPreview();
+        };
+        img.src = String(reader.result);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 </script>

@@ -86,8 +86,26 @@ const maxCatConsultas = Math.max(
   1,
   ...dash.categoriasMaisConsultadas.map((cat) => Number(cat.totalConsultas || 0)),
 );
+const maxPaisAcessos = Math.max(
+  1,
+  ...(dash.origensPaises || []).map((p: any) => Number(p.acessos || 0)),
+);
+const maxCidadeAcessos = Math.max(
+  1,
+  ...(dash.origensCidadesPaises || []).map((c: any) => Number(c.acessos || 0)),
+);
 ---
 <Layout title="Dashboard & Início" active="home">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+  <script
+    is:inline
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
   <style>
     .kpi-card {
       display: flex;
@@ -153,6 +171,44 @@ const maxCatConsultas = Math.max(
       border-radius: 999px;
       font-size: 12px;
       font-weight: 700;
+    }
+    .geo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #f8fafc;
+      margin-bottom: 8px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .geo-row:hover {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+    .geo-flag {
+      font-size: 22px;
+      line-height: 1;
+      width: 28px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .geo-map-box {
+      display: none;
+      margin-top: 12px;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #0f172a;
+    }
+    .geo-map-box.open {
+      display: block;
+    }
+    #mapa-origem-leaflet {
+      width: 100%;
+      height: 390px;
+      background: #e2e8f0;
     }
   </style>
 
@@ -232,6 +288,196 @@ const maxCatConsultas = Math.max(
         ) : (
           <span>Estoque regular · <a href="/produtos/novo">+ Novo produto</a></span>
         )}
+      </div>
+    </div>
+  </div>
+
+  <!-- Linha 1.5: Origem Geográfica dos Acessos (Item para Países + Item para Cidades/Países + Opção Mostrar no Mapa) -->
+  <div class="card" style="border-left:4px solid #0ea5e9">
+    <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="margin:0;color:#0369a1">🌍 Origem dos Acessos na Loja (Países e Cidades/Países)</h2>
+        <small class="muted">
+          Distribuição geográfica das visitas por <strong>Países</strong> e por <strong>Cidades / Países</strong> ({dash.resumo.totalAcessosGeograficos || 0} acesso(s) mapeado(s)).
+        </small>
+      </div>
+      <span class="spacer"></span>
+      <button
+        type="button"
+        class="btn sm"
+        id="btn-toggle-mapa-acessos"
+        style="background:#0284c7;border-color:#0284c7;font-weight:700;display:inline-flex;align-items:center;gap:6px"
+      >
+        🗺️ Mostrar no Mapa
+      </button>
+    </div>
+
+    <!-- Painel do Mapa Interativo (recolhido por padrão, abre ao clicar em "Mostrar no Mapa" ou em qualquer País/Cidade) -->
+    <div id="box-mapa-acessos" class="geo-map-box">
+      <div
+        class="row"
+        style="padding:10px 14px;background:#0f172a;color:#ffffff;justify-content:space-between;gap:10px;flex-wrap:wrap"
+      >
+        <div style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+          <span>🗺️ Mapa Interativo de Origem dos Acessos</span>
+          <span
+            id="lbl-foco-mapa"
+            style="font-size:11.5px;background:rgba(56,189,248,0.2);color:#bae6fd;padding:2px 9px;border-radius:99px"
+          >
+            Visão geral de todas as localidades
+          </span>
+        </div>
+        <div class="row" style="gap:6px;margin:0">
+          <button
+            type="button"
+            class="btn sec sm"
+            id="btn-reset-zoom-mapa"
+            style="padding:4px 10px;font-size:12px;background:#1e293b;color:#e2e8f0;border-color:#334155"
+          >
+            🌐 Ver Todos os Pontos
+          </button>
+          <button
+            type="button"
+            class="btn sec sm"
+            id="btn-fechar-mapa-acessos"
+            style="padding:4px 10px;font-size:12px;background:#1e293b;color:#e2e8f0;border-color:#334155"
+          >
+            ✕ Ocultar Mapa
+          </button>
+        </div>
+      </div>
+      <div id="mapa-origem-leaflet"></div>
+    </div>
+
+    <div class="grid" style="margin-top:12px">
+      <!-- Item 1: Países -->
+      <div class="c6">
+        <div style="padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;height:100%">
+          <div class="row" style="justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0;font-size:15px;color:#0f172a;display:flex;align-items:center;gap:6px">
+              🏳️ Acessos por Países
+            </h3>
+            <span class="tag" style="background:#e0f2fe;color:#0369a1;font-weight:700">
+              {(dash.origensPaises || []).length} país(es)
+            </span>
+          </div>
+
+          {(dash.origensPaises || []).length === 0 ? (
+            <p class="muted" style="font-size:13px;margin:8px 0">
+              Nenhum acesso geográfico por país registrado até o momento.
+            </p>
+          ) : (
+            <div style="max-height:310px;overflow-y:auto;padding-right:2px">
+              {(dash.origensPaises || []).map((p: any, idx: number) => {
+                const percBarra = Math.min(100, Math.round((Number(p.acessos || 0) / maxPaisAcessos) * 100));
+                return (
+                  <div class="geo-row">
+                    <div style="font-size:12px;font-weight:800;color:#64748b;width:22px">#{idx + 1}</div>
+                    <div class="geo-flag">{p.bandeira}</div>
+                    <div style="flex:1;min-width:0">
+                      <div class="row" style="justify-content:space-between;gap:8px;margin:0">
+                        <strong style="color:#0f172a;font-size:13.5px">
+                          {p.paisNome}{' '}
+                          <span class="muted" style="font-weight:500;font-size:12px">({p.paisCodigo})</span>
+                        </strong>
+                        <div class="row" style="gap:6px;margin:0">
+                          <span class="metric-pill" style="background:#e0f2fe;color:#0369a1">
+                            {p.acessos} {p.acessos === 1 ? 'acesso' : 'acessos'} ({p.percentual}%)
+                          </span>
+                          <button
+                            type="button"
+                            class="btn sec sm btn-focar-mapa"
+                            style="padding:2px 8px;font-size:11.5px;border-color:#7dd3fc;color:#0284c7"
+                            data-lat={p.latitude}
+                            data-lon={p.longitude}
+                            data-zoom="4"
+                            data-label={`${p.bandeira} ${p.paisNome} (${p.acessos} acesso(s))`}
+                            title={`Ver ${p.paisNome} no mapa`}
+                          >
+                            📍 Mapa
+                          </button>
+                        </div>
+                      </div>
+                      <div class="cat-rank-bar-bg">
+                        <div
+                          class="cat-rank-bar-fill"
+                          style={`width:${Math.max(5, percBarra)}%;background:linear-gradient(90deg,#0284c7,#38bdf8)`}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- Item 2: Cidades / Países -->
+      <div class="c6">
+        <div style="padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;height:100%">
+          <div class="row" style="justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0;font-size:15px;color:#0f172a;display:flex;align-items:center;gap:6px">
+              🏙️ Acessos por Cidades / Países
+            </h3>
+            <span class="tag" style="background:#ede9fe;color:#6d28d9;font-weight:700">
+              {(dash.origensCidadesPaises || []).length} cidade(s)
+            </span>
+          </div>
+
+          {(dash.origensCidadesPaises || []).length === 0 ? (
+            <p class="muted" style="font-size:13px;margin:8px 0">
+              Nenhum acesso geográfico por cidade/país registrado até o momento.
+            </p>
+          ) : (
+            <div style="max-height:310px;overflow-y:auto;padding-right:2px">
+              {(dash.origensCidadesPaises || []).map((cid: any, idx: number) => {
+                const percBarra = Math.min(100, Math.round((Number(cid.acessos || 0) / maxCidadeAcessos) * 100));
+                return (
+                  <div class="geo-row">
+                    <div style="font-size:12px;font-weight:800;color:#64748b;width:22px">#{idx + 1}</div>
+                    <div class="geo-flag">{cid.bandeira}</div>
+                    <div style="flex:1;min-width:0">
+                      <div class="row" style="justify-content:space-between;gap:8px;margin:0">
+                        <strong
+                          style="color:#0f172a;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                          title={cid.cidadePaisLabel}
+                        >
+                          {cid.cidade}
+                          {cid.regiao ? `/${cid.regiao}` : ''}{' '}
+                          <span class="muted" style="font-weight:500;font-size:12px">· {cid.paisNome}</span>
+                        </strong>
+                        <div class="row" style="gap:6px;margin:0">
+                          <span class="metric-pill" style="background:#ede9fe;color:#6d28d9">
+                            {cid.acessos} {cid.acessos === 1 ? 'acesso' : 'acessos'} ({cid.percentual}%)
+                          </span>
+                          <button
+                            type="button"
+                            class="btn sec sm btn-focar-mapa"
+                            style="padding:2px 8px;font-size:11.5px;border-color:#c4b5fd;color:#6d28d9"
+                            data-lat={cid.latitude}
+                            data-lon={cid.longitude}
+                            data-zoom="10"
+                            data-label={`${cid.bandeira} ${cid.cidadePaisLabel} (${cid.acessos} acesso(s))`}
+                            title={`Ver ${cid.cidadePaisLabel} no mapa`}
+                          >
+                            📍 Mapa
+                          </button>
+                        </div>
+                      </div>
+                      <div class="cat-rank-bar-bg">
+                        <div
+                          class="cat-rank-bar-fill"
+                          style={`width:${Math.max(5, percBarra)}%;background:linear-gradient(90deg,#7c3aed,#a78bfa)`}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   </div>
@@ -415,4 +661,150 @@ const maxCatConsultas = Math.max(
       </div>
     )}
   </div>
+
+  <script
+    is:inline
+    define:vars={{
+      PONTOS_CIDADES_MAPA: dash.origensCidadesPaises || [],
+      PONTOS_PAISES_MAPA: dash.origensPaises || [],
+    }}
+  >
+    (function () {
+      const btnToggle = document.getElementById('btn-toggle-mapa-acessos');
+      const btnFechar = document.getElementById('btn-fechar-mapa-acessos');
+      const btnReset = document.getElementById('btn-reset-zoom-mapa');
+      const boxMapa = document.getElementById('box-mapa-acessos');
+      const lblFoco = document.getElementById('lbl-foco-mapa');
+      const mapEl = document.getElementById('mapa-origem-leaflet');
+      if (!btnToggle || !boxMapa || !mapEl) return;
+
+      let mapInstance = null;
+      let markersBounds = null;
+      const markersByCoord = new Map();
+
+      function initOrRefreshMap() {
+        if (typeof window.L === 'undefined') {
+          mapEl.innerHTML =
+            '<div style="padding:24px;text-align:center;color:#475569">Não foi possível carregar os blocos do mapa neste momento.</div>';
+          return;
+        }
+        if (mapInstance) {
+          setTimeout(() => mapInstance.invalidateSize(), 60);
+          return;
+        }
+
+        mapInstance = window.L.map(mapEl, {
+          center: [-15.78, -47.93],
+          zoom: 3,
+          scrollWheelZoom: true,
+        });
+
+        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '&copy; OpenStreetMap',
+        }).addTo(mapInstance);
+
+        const pontos =
+          Array.isArray(PONTOS_CIDADES_MAPA) && PONTOS_CIDADES_MAPA.length > 0
+            ? PONTOS_CIDADES_MAPA
+            : Array.isArray(PONTOS_PAISES_MAPA)
+              ? PONTOS_PAISES_MAPA
+              : [];
+
+        const latLngs = [];
+        const maxAcc = Math.max(1, ...pontos.map((pt) => Number(pt.acessos || 1)));
+
+        pontos.forEach((pt) => {
+          const lat = Number(pt.latitude);
+          const lon = Number(pt.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+          const qtd = Number(pt.acessos || 1);
+          const raio = Math.min(26, Math.max(9, 9 + Math.round((qtd / maxAcc) * 16)));
+          const titulo = pt.cidadePaisLabel || pt.paisNome || 'Origem';
+          const circle = window.L.circleMarker([lat, lon], {
+            radius: raio,
+            color: '#1e3a8a',
+            weight: 2,
+            fillColor: '#0284c7',
+            fillOpacity: 0.72,
+          }).addTo(mapInstance);
+
+          circle.bindPopup(
+            '<div style="font-family:system-ui,sans-serif;min-width:170px">' +
+              '<div style="font-size:14px;font-weight:800;margin-bottom:3px">' +
+              (pt.bandeira || '📍') +
+              ' ' +
+              titulo +
+              '</div>' +
+              '<div style="font-size:12.5px;color:#0369a1;font-weight:700">' +
+              qtd +
+              (qtd === 1 ? ' acesso registrado' : ' acessos registrados') +
+              (pt.percentual ? ' (' + pt.percentual + '%)' : '') +
+              '</div>' +
+              '</div>',
+          );
+
+          latLngs.push([lat, lon]);
+          markersByCoord.set(lat.toFixed(3) + ',' + lon.toFixed(3), circle);
+        });
+
+        if (latLngs.length > 1) {
+          markersBounds = window.L.latLngBounds(latLngs);
+          mapInstance.fitBounds(markersBounds, { padding: [38, 38], maxZoom: 10 });
+        } else if (latLngs.length === 1) {
+          mapInstance.setView(latLngs[0], 6);
+        }
+
+        setTimeout(() => mapInstance.invalidateSize(), 80);
+      }
+
+      function setMapaVisivel(visivel) {
+        boxMapa.classList.toggle('open', visivel);
+        btnToggle.innerHTML = visivel ? '🗺️ Ocultar Mapa' : '🗺️ Mostrar no Mapa';
+        if (visivel) {
+          initOrRefreshMap();
+        }
+      }
+
+      btnToggle.addEventListener('click', () => {
+        setMapaVisivel(!boxMapa.classList.contains('open'));
+      });
+
+      if (btnFechar) {
+        btnFechar.addEventListener('click', () => setMapaVisivel(false));
+      }
+
+      if (btnReset) {
+        btnReset.addEventListener('click', () => {
+          if (!mapInstance) return;
+          if (lblFoco) lblFoco.textContent = 'Visão geral de todas as localidades';
+          if (markersBounds) {
+            mapInstance.fitBounds(markersBounds, { padding: [38, 38], maxZoom: 10 });
+          } else {
+            mapInstance.setView([-15.78, -47.93], 3);
+          }
+        });
+      }
+
+      document.querySelectorAll('.btn-focar-mapa').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const lat = Number(btn.getAttribute('data-lat'));
+          const lon = Number(btn.getAttribute('data-lon'));
+          const zoom = Number(btn.getAttribute('data-zoom')) || 8;
+          const label = btn.getAttribute('data-label') || '';
+          setMapaVisivel(true);
+          setTimeout(() => {
+            if (!mapInstance || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+            mapInstance.invalidateSize();
+            mapInstance.setView([lat, lon], zoom, { animate: true });
+            if (lblFoco && label) lblFoco.textContent = 'Foco: ' + label;
+            const key = lat.toFixed(3) + ',' + lon.toFixed(3);
+            const marker = markersByCoord.get(key);
+            if (marker) marker.openPopup();
+          }, 100);
+        });
+      });
+    })();
+  </script>
 </Layout>

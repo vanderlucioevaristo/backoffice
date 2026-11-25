@@ -1466,12 +1466,18 @@ const catHeaderText =
             const now = Date.now();
             localStorage.setItem(ultKey, String(now));
             const durSeg = Math.max(1, Math.round((now - iniMs) / 1000));
+            let tz = '';
+            try {
+              tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            } catch {}
             const payload = JSON.stringify({
               empresa: empCod,
               acao: 'ping_visita',
               visitaToken: token,
               duracaoSegundos: durSeg,
               intervaloRetornoSegundos: intervaloRetornoSeg,
+              timezone: tz,
+              idioma: navigator.language || '',
             });
 
             fetch('/api/loja-metricas', {

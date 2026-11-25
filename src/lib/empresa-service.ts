@@ -1759,9 +1759,221 @@ export async function registrarInsercaoCarrinhoProduto(
   }
 }
 
+export const MAPA_PAISES_GEO: Record<
+  string,
+  { nome: string; bandeira: string; lat: number; lon: number; capital: string }
+> = {
+  BR: { nome: 'Brasil', bandeira: '🇧🇷', lat: -23.5505, lon: -46.6333, capital: 'São Paulo' },
+  US: { nome: 'Estados Unidos', bandeira: '🇺🇸', lat: 38.9072, lon: -77.0369, capital: 'Washington' },
+  PT: { nome: 'Portugal', bandeira: '🇵🇹', lat: 38.7223, lon: -9.1393, capital: 'Lisboa' },
+  AR: { nome: 'Argentina', bandeira: '🇦🇷', lat: -34.6037, lon: -58.3816, capital: 'Buenos Aires' },
+  CL: { nome: 'Chile', bandeira: '🇨🇱', lat: -33.4489, lon: -70.6693, capital: 'Santiago' },
+  UY: { nome: 'Uruguai', bandeira: '🇺🇾', lat: -34.9011, lon: -56.1645, capital: 'Montevidéu' },
+  PY: { nome: 'Paraguai', bandeira: '🇵🇾', lat: -25.2637, lon: -57.5759, capital: 'Assunção' },
+  CO: { nome: 'Colômbia', bandeira: '🇨🇴', lat: 4.711, lon: -74.0721, capital: 'Bogotá' },
+  PE: { nome: 'Peru', bandeira: '🇵🇪', lat: -12.0464, lon: -77.0428, capital: 'Lima' },
+  MX: { nome: 'México', bandeira: '🇲🇽', lat: 19.4326, lon: -99.1332, capital: 'Cidade do México' },
+  CA: { nome: 'Canadá', bandeira: '🇨🇦', lat: 45.4215, lon: -75.6972, capital: 'Ottawa' },
+  ES: { nome: 'Espanha', bandeira: '🇪🇸', lat: 40.4168, lon: -3.7038, capital: 'Madri' },
+  FR: { nome: 'França', bandeira: '🇫🇷', lat: 48.8566, lon: 2.3522, capital: 'Paris' },
+  IT: { nome: 'Itália', bandeira: '🇮🇹', lat: 41.9028, lon: 12.4964, capital: 'Roma' },
+  DE: { nome: 'Alemanha', bandeira: '🇩🇪', lat: 52.52, lon: 13.405, capital: 'Berlim' },
+  GB: { nome: 'Reino Unido', bandeira: '🇬🇧', lat: 51.5072, lon: -0.1276, capital: 'Londres' },
+  NL: { nome: 'Países Baixos', bandeira: '🇳🇱', lat: 52.3676, lon: 4.9041, capital: 'Amsterdã' },
+  CH: { nome: 'Suíça', bandeira: '🇨🇭', lat: 46.948, lon: 7.4474, capital: 'Berna' },
+  JP: { nome: 'Japão', bandeira: '🇯🇵', lat: 35.6762, lon: 139.6503, capital: 'Tóquio' },
+  CN: { nome: 'China', bandeira: '🇨🇳', lat: 39.9042, lon: 116.4074, capital: 'Pequim' },
+  IN: { nome: 'Índia', bandeira: '🇮🇳', lat: 28.6139, lon: 77.209, capital: 'Nova Délhi' },
+  AU: { nome: 'Austrália', bandeira: '🇦🇺', lat: -33.8688, lon: 151.2093, capital: 'Sydney' },
+  AO: { nome: 'Angola', bandeira: '🇦🇴', lat: -8.839, lon: 13.2894, capital: 'Luanda' },
+  MZ: { nome: 'Moçambique', bandeira: '🇲🇿', lat: -25.9692, lon: 32.5732, capital: 'Maputo' },
+};
+
+export const COORDENADAS_CIDADES_CONHECIDAS: Record<
+  string,
+  { cidade: string; regiao?: string; paisCodigo: string; lat: number; lon: number }
+> = {
+  'sao paulo': { cidade: 'São Paulo', regiao: 'SP', paisCodigo: 'BR', lat: -23.5505, lon: -46.6333 },
+  'rio de janeiro': { cidade: 'Rio de Janeiro', regiao: 'RJ', paisCodigo: 'BR', lat: -22.9068, lon: -43.1729 },
+  'belo horizonte': { cidade: 'Belo Horizonte', regiao: 'MG', paisCodigo: 'BR', lat: -19.9167, lon: -43.9345 },
+  brasilia: { cidade: 'Brasília', regiao: 'DF', paisCodigo: 'BR', lat: -15.7975, lon: -47.8919 },
+  curitiba: { cidade: 'Curitiba', regiao: 'PR', paisCodigo: 'BR', lat: -25.4284, lon: -49.2733 },
+  'porto alegre': { cidade: 'Porto Alegre', regiao: 'RS', paisCodigo: 'BR', lat: -30.0346, lon: -51.2177 },
+  salvador: { cidade: 'Salvador', regiao: 'BA', paisCodigo: 'BR', lat: -12.9777, lon: -38.5016 },
+  recife: { cidade: 'Recife', regiao: 'PE', paisCodigo: 'BR', lat: -8.0476, lon: -34.877 },
+  fortaleza: { cidade: 'Fortaleza', regiao: 'CE', paisCodigo: 'BR', lat: -3.7319, lon: -38.5267 },
+  manaus: { cidade: 'Manaus', regiao: 'AM', paisCodigo: 'BR', lat: -3.119, lon: -60.0217 },
+  belem: { cidade: 'Belém', regiao: 'PA', paisCodigo: 'BR', lat: -1.4558, lon: -48.4902 },
+  goiania: { cidade: 'Goiânia', regiao: 'GO', paisCodigo: 'BR', lat: -16.6869, lon: -49.2648 },
+  campinas: { cidade: 'Campinas', regiao: 'SP', paisCodigo: 'BR', lat: -22.9099, lon: -47.0626 },
+  florianopolis: { cidade: 'Florianópolis', regiao: 'SC', paisCodigo: 'BR', lat: -27.5954, lon: -48.548 },
+  vitoria: { cidade: 'Vitória', regiao: 'ES', paisCodigo: 'BR', lat: -20.3155, lon: -40.3128 },
+  natal: { cidade: 'Natal', regiao: 'RN', paisCodigo: 'BR', lat: -5.7945, lon: -35.211 },
+  cuiaba: { cidade: 'Cuiabá', regiao: 'MT', paisCodigo: 'BR', lat: -15.6014, lon: -56.0979 },
+  'campo grande': { cidade: 'Campo Grande', regiao: 'MS', paisCodigo: 'BR', lat: -20.4697, lon: -54.6201 },
+  maceio: { cidade: 'Maceió', regiao: 'AL', paisCodigo: 'BR', lat: -9.6658, lon: -35.735 },
+  'joao pessoa': { cidade: 'João Pessoa', regiao: 'PB', paisCodigo: 'BR', lat: -7.1195, lon: -34.845 },
+  teresina: { cidade: 'Teresina', regiao: 'PI', paisCodigo: 'BR', lat: -5.092, lon: -42.8038 },
+  'sao luis': { cidade: 'São Luís', regiao: 'MA', paisCodigo: 'BR', lat: -2.5307, lon: -44.3068 },
+  aracaju: { cidade: 'Aracaju', regiao: 'SE', paisCodigo: 'BR', lat: -10.9472, lon: -37.0731 },
+  lisboa: { cidade: 'Lisboa', regiao: 'LX', paisCodigo: 'PT', lat: 38.7223, lon: -9.1393 },
+  porto: { cidade: 'Porto', regiao: 'PT', paisCodigo: 'PT', lat: 41.1579, lon: -8.6291 },
+  miami: { cidade: 'Miami', regiao: 'FL', paisCodigo: 'US', lat: 25.7617, lon: -80.1918 },
+  'new york': { cidade: 'New York', regiao: 'NY', paisCodigo: 'US', lat: 40.7128, lon: -74.006 },
+  orlando: { cidade: 'Orlando', regiao: 'FL', paisCodigo: 'US', lat: 28.5383, lon: -81.3792 },
+  'buenos aires': { cidade: 'Buenos Aires', regiao: 'BA', paisCodigo: 'AR', lat: -34.6037, lon: -58.3816 },
+  santiago: { cidade: 'Santiago', regiao: 'RM', paisCodigo: 'CL', lat: -33.4489, lon: -70.6693 },
+  madri: { cidade: 'Madri', regiao: 'MD', paisCodigo: 'ES', lat: 40.4168, lon: -3.7038 },
+  madrid: { cidade: 'Madri', regiao: 'MD', paisCodigo: 'ES', lat: 40.4168, lon: -3.7038 },
+  paris: { cidade: 'Paris', regiao: 'IDF', paisCodigo: 'FR', lat: 48.8566, lon: 2.3522 },
+  londres: { cidade: 'Londres', regiao: 'ENG', paisCodigo: 'GB', lat: 51.5072, lon: -0.1276 },
+  london: { cidade: 'Londres', regiao: 'ENG', paisCodigo: 'GB', lat: 51.5072, lon: -0.1276 },
+};
+
+const MAPA_TIMEZONE_GEO: Record<
+  string,
+  { cidade: string; regiao: string; paisCodigo: string; lat: number; lon: number }
+> = {
+  'America/Sao_Paulo': { cidade: 'São Paulo', regiao: 'SP', paisCodigo: 'BR', lat: -23.5505, lon: -46.6333 },
+  'America/Bahia': { cidade: 'Salvador', regiao: 'BA', paisCodigo: 'BR', lat: -12.9777, lon: -38.5016 },
+  'America/Recife': { cidade: 'Recife', regiao: 'PE', paisCodigo: 'BR', lat: -8.0476, lon: -34.877 },
+  'America/Fortaleza': { cidade: 'Fortaleza', regiao: 'CE', paisCodigo: 'BR', lat: -3.7319, lon: -38.5267 },
+  'America/Manaus': { cidade: 'Manaus', regiao: 'AM', paisCodigo: 'BR', lat: -3.119, lon: -60.0217 },
+  'America/Belem': { cidade: 'Belém', regiao: 'PA', paisCodigo: 'BR', lat: -1.4558, lon: -48.4902 },
+  'America/Cuiaba': { cidade: 'Cuiabá', regiao: 'MT', paisCodigo: 'BR', lat: -15.6014, lon: -56.0979 },
+  'America/Campo_Grande': { cidade: 'Campo Grande', regiao: 'MS', paisCodigo: 'BR', lat: -20.4697, lon: -54.6201 },
+  'America/Maceio': { cidade: 'Maceió', regiao: 'AL', paisCodigo: 'BR', lat: -9.6658, lon: -35.735 },
+  'Europe/Lisbon': { cidade: 'Lisboa', regiao: 'LX', paisCodigo: 'PT', lat: 38.7223, lon: -9.1393 },
+  'America/New_York': { cidade: 'New York', regiao: 'NY', paisCodigo: 'US', lat: 40.7128, lon: -74.006 },
+  'America/Argentina/Buenos_Aires': { cidade: 'Buenos Aires', regiao: 'BA', paisCodigo: 'AR', lat: -34.6037, lon: -58.3816 },
+  'America/Santiago': { cidade: 'Santiago', regiao: 'RM', paisCodigo: 'CL', lat: -33.4489, lon: -70.6693 },
+  'Europe/Madrid': { cidade: 'Madri', regiao: 'MD', paisCodigo: 'ES', lat: 40.4168, lon: -3.7038 },
+  'Europe/Paris': { cidade: 'Paris', regiao: 'IDF', paisCodigo: 'FR', lat: 48.8566, lon: 2.3522 },
+  'Europe/London': { cidade: 'Londres', regiao: 'ENG', paisCodigo: 'GB', lat: 51.5072, lon: -0.1276 },
+};
+
+export function bandeiraPaisPorCodigo(codigoIso2?: string | null): string {
+  const code = String(codigoIso2 ?? '')
+    .trim()
+    .toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return '🌐';
+  if (MAPA_PAISES_GEO[code]?.bandeira) return MAPA_PAISES_GEO[code].bandeira;
+  const A = 0x1f1e6;
+  return String.fromCodePoint(A + (code.charCodeAt(0) - 65), A + (code.charCodeAt(1) - 65));
+}
+
+export function normalizarChaveCidade(nome?: string | null): string {
+  return String(nome ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+export function resolverOrigemGeograficaAcesso(dados: {
+  cfCountry?: string | null;
+  cfCity?: string | null;
+  cfRegion?: string | null;
+  cfLatitude?: string | number | null;
+  cfLongitude?: string | number | null;
+  timezone?: string | null;
+  idioma?: string | null;
+  cidadeFallback?: string | null;
+  ufFallback?: string | null;
+}): {
+  paisCodigo: string;
+  paisNome: string;
+  bandeira: string;
+  cidade: string;
+  regiao: string;
+  latitude: number;
+  longitude: number;
+} {
+  let paisCodigo = String(dados.cfCountry ?? '')
+    .trim()
+    .toUpperCase();
+  if (paisCodigo === 'XX' || paisCodigo === 'T1' || !/^[A-Z]{2}$/.test(paisCodigo)) {
+    paisCodigo = '';
+  }
+
+  let cidade = String(dados.cfCity ?? '').trim();
+  let regiao = String(dados.cfRegion ?? '').trim();
+  let lat = Number(dados.cfLatitude);
+  let lon = Number(dados.cfLongitude);
+
+  // Fallback 1: Cidade/UF conhecida (ex.: cadastro ou endereço da loja/cliente)
+  if (!cidade && dados.cidadeFallback) {
+    cidade = String(dados.cidadeFallback).trim();
+    if (!regiao && dados.ufFallback) regiao = String(dados.ufFallback).trim();
+  }
+
+  // Fallback 2: Fuso horário do navegador (Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const tz = String(dados.timezone ?? '').trim();
+  if (tz && MAPA_TIMEZONE_GEO[tz]) {
+    const infoTz = MAPA_TIMEZONE_GEO[tz];
+    if (!paisCodigo) paisCodigo = infoTz.paisCodigo;
+    if (!cidade) cidade = infoTz.cidade;
+    if (!regiao) regiao = infoTz.regiao;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) {
+      lat = infoTz.lat;
+      lon = infoTz.lon;
+    }
+  }
+
+  // Fallback 3: Idioma do navegador (ex.: pt-BR, pt-PT, en-US, es-AR)
+  if (!paisCodigo && dados.idioma) {
+    const m = /-([A-Za-z]{2})\b/.exec(String(dados.idioma));
+    if (m) {
+      const cand = m[1].toUpperCase();
+      if (MAPA_PAISES_GEO[cand]) paisCodigo = cand;
+    }
+  }
+
+  if (!paisCodigo) paisCodigo = 'BR';
+
+  const infoPais = MAPA_PAISES_GEO[paisCodigo] || {
+    nome: paisCodigo,
+    bandeira: bandeiraPaisPorCodigo(paisCodigo),
+    lat: -23.5505,
+    lon: -46.6333,
+    capital: 'São Paulo',
+  };
+
+  if (!cidade) {
+    cidade = infoPais.capital;
+  }
+
+  const chaveCid = normalizarChaveCidade(cidade);
+  const cidConhecida = COORDENADAS_CIDADES_CONHECIDAS[chaveCid];
+  if (cidConhecida) {
+    cidade = cidConhecida.cidade;
+    if (!regiao && cidConhecida.regiao) regiao = cidConhecida.regiao;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) {
+      lat = cidConhecida.lat;
+      lon = cidConhecida.lon;
+    }
+  }
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) {
+    lat = infoPais.lat;
+    lon = infoPais.lon;
+  }
+
+  return {
+    paisCodigo,
+    paisNome: infoPais.nome,
+    bandeira: infoPais.bandeira,
+    cidade: cidade.slice(0, 80),
+    regiao: regiao.slice(0, 40),
+    latitude: Math.round(lat * 10000) / 10000,
+    longitude: Math.round(lon * 10000) / 10000,
+  };
+}
+
 /**
- * Registra ou atualiza o tempo de permanência de uma visita na loja e o intervalo desde a última visita
- * (de forma 100% agregada/anônima por sessão de visita, sem vincular nem individualizar por cliente).
+ * Registra ou atualiza o tempo de permanência de uma visita na loja, o intervalo desde a última visita
+ * e a origem geográfica do acesso (País, Cidade/País e coordenadas para o Mapa do Dashboard),
+ * de forma 100% agregada/anônima por sessão de visita.
  */
 export async function registrarPingVisitaLoja(
   database: any,
@@ -1770,6 +1982,12 @@ export async function registrarPingVisitaLoja(
     visitaToken: string;
     duracaoSegundos: number;
     intervaloRetornoSegundos?: number | null;
+    paisCodigo?: string | null;
+    paisNome?: string | null;
+    cidade?: string | null;
+    regiao?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
   },
 ): Promise<void> {
   const token = String(dados.visitaToken ?? '')
@@ -1785,19 +2003,39 @@ export async function registrarPingVisitaLoja(
       ? Math.max(1, Math.min(365 * 86400, Math.round(Number(retRaw))))
       : null;
 
+  const paisCod = dados.paisCodigo ? String(dados.paisCodigo).trim().toUpperCase().slice(0, 5) : null;
+  const paisNom = dados.paisNome ? String(dados.paisNome).trim().slice(0, 80) : null;
+  const cid = dados.cidade ? String(dados.cidade).trim().slice(0, 80) : null;
+  const reg = dados.regiao ? String(dados.regiao).trim().slice(0, 40) : null;
+  const lat =
+    dados.latitude !== null && dados.latitude !== undefined && Number.isFinite(Number(dados.latitude))
+      ? Number(dados.latitude)
+      : null;
+  const lon =
+    dados.longitude !== null && dados.longitude !== undefined && Number.isFinite(Number(dados.longitude))
+      ? Number(dados.longitude)
+      : null;
+
   try {
     await database
       .prepare(
         `INSERT INTO loja_visitas_metricas
-           (visita_token, empresa_id, duracao_segundos, intervalo_retorno_segundos, iniciado_em, atualizado_em)
-         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+           (visita_token, empresa_id, duracao_segundos, intervalo_retorno_segundos,
+            pais_codigo, pais_nome, cidade, regiao, latitude, longitude, iniciado_em, atualizado_em)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
          ON CONFLICT (visita_token)
          DO UPDATE SET
            duracao_segundos = MAX(loja_visitas_metricas.duracao_segundos, excluded.duracao_segundos),
            intervalo_retorno_segundos = COALESCE(loja_visitas_metricas.intervalo_retorno_segundos, excluded.intervalo_retorno_segundos),
+           pais_codigo = COALESCE(loja_visitas_metricas.pais_codigo, excluded.pais_codigo),
+           pais_nome = COALESCE(loja_visitas_metricas.pais_nome, excluded.pais_nome),
+           cidade = COALESCE(loja_visitas_metricas.cidade, excluded.cidade),
+           regiao = COALESCE(loja_visitas_metricas.regiao, excluded.regiao),
+           latitude = COALESCE(loja_visitas_metricas.latitude, excluded.latitude),
+           longitude = COALESCE(loja_visitas_metricas.longitude, excluded.longitude),
            atualizado_em = datetime('now')`,
       )
-      .bind(token, dados.empresaId, dur, ret)
+      .bind(token, dados.empresaId, dur, ret, paisCod, paisNom, cid, reg, lat, lon)
       .run();
   } catch {
     // Ignora falha silenciosamente
@@ -1970,6 +2208,157 @@ export async function obterMetricasDashboardLoja(database: any, empresaId: numbe
     .bind(empresaId)
     .first();
 
+  // 4. Origem geográfica dos acessos: Países e Cidades/Países (com coordenadas para exibição no Mapa)
+  const { results: visitasGeoRows } = await database
+    .prepare(
+      `SELECT pais_codigo, pais_nome, cidade, regiao, latitude, longitude, COUNT(*) AS acessos
+         FROM loja_visitas_metricas
+        WHERE empresa_id = ?
+        GROUP BY COALESCE(pais_codigo, 'BR'), COALESCE(pais_nome, 'Brasil'), COALESCE(cidade, ''), COALESCE(regiao, '')`,
+    )
+    .bind(empresaId)
+    .all();
+
+  // Também complementa com cidades/países de pedidos da loja caso existam pedidos anteriores às métricas de visita
+  const { results: pedidosGeoRows } = await database
+    .prepare(
+      `SELECT COALESCE(NULLIF(TRIM(c.cidade), ''), 'São Paulo') AS cidade,
+              COALESCE(NULLIF(TRIM(c.uf), ''), 'SP') AS uf,
+              COUNT(lp.id) AS qtd_pedidos
+         FROM loja_pedidos lp
+         JOIN parceiros c ON c.id = lp.parceiro_id AND c.empresa_id = lp.empresa_id
+        WHERE lp.empresa_id = ? AND lp.status <> 'cancelado'
+        GROUP BY COALESCE(NULLIF(TRIM(c.cidade), ''), 'São Paulo'), COALESCE(NULLIF(TRIM(c.uf), ''), 'SP')`,
+    )
+    .bind(empresaId)
+    .all();
+
+  const mapaPaises = new Map<
+    string,
+    {
+      paisCodigo: string;
+      paisNome: string;
+      bandeira: string;
+      acessos: number;
+      latitude: number;
+      longitude: number;
+    }
+  >();
+
+  const mapaCidadesPaises = new Map<
+    string,
+    {
+      cidade: string;
+      regiao: string;
+      paisCodigo: string;
+      paisNome: string;
+      bandeira: string;
+      cidadePaisLabel: string;
+      acessos: number;
+      latitude: number;
+      longitude: number;
+    }
+  >();
+
+  const acumularOrigem = (info: {
+    paisCodigo: string;
+    paisNome: string;
+    bandeira: string;
+    cidade: string;
+    regiao: string;
+    latitude: number;
+    longitude: number;
+    acessos: number;
+  }) => {
+    const qtd = Math.max(0, Number(info.acessos || 0));
+    if (qtd <= 0) return;
+
+    const pKey = info.paisCodigo;
+    const pAtual = mapaPaises.get(pKey) || {
+      paisCodigo: info.paisCodigo,
+      paisNome: info.paisNome,
+      bandeira: info.bandeira,
+      acessos: 0,
+      latitude: info.latitude,
+      longitude: info.longitude,
+    };
+    pAtual.acessos += qtd;
+    mapaPaises.set(pKey, pAtual);
+
+    const cKey = `${normalizarChaveCidade(info.cidade)}|${info.regiao.toUpperCase()}|${info.paisCodigo}`;
+    const labelCidade = info.regiao ? `${info.cidade} (${info.regiao})` : info.cidade;
+    const cAtual = mapaCidadesPaises.get(cKey) || {
+      cidade: info.cidade,
+      regiao: info.regiao,
+      paisCodigo: info.paisCodigo,
+      paisNome: info.paisNome,
+      bandeira: info.bandeira,
+      cidadePaisLabel: `${labelCidade} — ${info.paisNome}`,
+      acessos: 0,
+      latitude: info.latitude,
+      longitude: info.longitude,
+    };
+    cAtual.acessos += qtd;
+    mapaCidadesPaises.set(cKey, cAtual);
+  };
+
+  for (const r of visitasGeoRows || []) {
+    const resolvido = resolverOrigemGeograficaAcesso({
+      cfCountry: r.pais_codigo,
+      cfCity: r.cidade,
+      cfRegion: r.regiao,
+      cfLatitude: r.latitude,
+      cfLongitude: r.longitude,
+    });
+    acumularOrigem({
+      ...resolvido,
+      paisNome: r.pais_nome ? String(r.pais_nome) : resolvido.paisNome,
+      acessos: Number(r.acessos || 0),
+    });
+  }
+
+  // Se existirem pedidos de cidades que ainda não estavam em loja_visitas_metricas, soma na origem geográfica
+  if ((visitasGeoRows || []).length === 0 && (pedidosGeoRows || []).length > 0) {
+    for (const pr of pedidosGeoRows || []) {
+      const resolvido = resolverOrigemGeograficaAcesso({
+        cfCountry: 'BR',
+        cidadeFallback: pr.cidade,
+        ufFallback: pr.uf,
+      });
+      acumularOrigem({
+        ...resolvido,
+        acessos: Number(pr.qtd_pedidos || 0),
+      });
+    }
+  }
+
+  const totalAcessosGeograficos = Array.from(mapaPaises.values()).reduce(
+    (acc, p) => acc + p.acessos,
+    0,
+  );
+
+  const origensPaises = Array.from(mapaPaises.values())
+    .filter((p) => p.acessos > 0)
+    .map((p) => ({
+      ...p,
+      percentual:
+        totalAcessosGeograficos > 0
+          ? Math.round((p.acessos / totalAcessosGeograficos) * 1000) / 10
+          : 0,
+    }))
+    .sort((a, b) => b.acessos - a.acessos || a.paisNome.localeCompare(b.paisNome));
+
+  const origensCidadesPaises = Array.from(mapaCidadesPaises.values())
+    .filter((c) => c.acessos > 0)
+    .map((c) => ({
+      ...c,
+      percentual:
+        totalAcessosGeograficos > 0
+          ? Math.round((c.acessos / totalAcessosGeograficos) * 1000) / 10
+          : 0,
+    }))
+    .sort((a, b) => b.acessos - a.acessos || a.cidadePaisLabel.localeCompare(b.cidadePaisLabel));
+
   const totalVisualizacoes = (produtosMetricas || []).reduce(
     (acc: number, p: any) => acc + Number(p.visualizacoes || 0),
     0,
@@ -1997,9 +2386,14 @@ export async function obterMetricasDashboardLoja(database: any, empresaId: numbe
       totalRetornos: Number(visitasStats?.total_retornos || 0),
       mediaPermanenciaSegundos: Math.round(Number(visitasStats?.media_permanencia_seg || 0)),
       mediaIntervaloRetornoSegundos: Math.round(Number(visitasStats?.media_retorno_seg || 0)),
+      totalAcessosGeograficos,
+      totalPaisesOrigem: origensPaises.length,
+      totalCidadesOrigem: origensCidadesPaises.length,
     },
     produtos: produtosMetricas || [],
     categoriasMaisConsultadas,
+    origensPaises,
+    origensCidadesPaises,
   };
 }
 

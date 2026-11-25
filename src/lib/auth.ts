@@ -416,6 +416,12 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE produtos ADD COLUMN visualizacoes INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE produtos ADD COLUMN insercoes_carrinho INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE empresas ADD COLUMN pix_instituicao TEXT NOT NULL DEFAULT 'Nubank'",
+      "ALTER TABLE loja_visitas_metricas ADD COLUMN pais_codigo TEXT",
+      "ALTER TABLE loja_visitas_metricas ADD COLUMN pais_nome TEXT",
+      "ALTER TABLE loja_visitas_metricas ADD COLUMN cidade TEXT",
+      "ALTER TABLE loja_visitas_metricas ADD COLUMN regiao TEXT",
+      "ALTER TABLE loja_visitas_metricas ADD COLUMN latitude REAL",
+      "ALTER TABLE loja_visitas_metricas ADD COLUMN longitude REAL",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});

@@ -5,6 +5,7 @@ import {
   registrarInsercaoCarrinhoProduto,
   registrarPingVisitaLoja,
   registrarVisualizacaoProduto,
+  resolverOrigemGeograficaAcesso,
 } from '../../lib/empresa-service';
 
 function json(data: unknown, status = 200) {
@@ -74,11 +75,28 @@ export const POST: APIRoute = async ({ request }) => {
         ? Number(body.intervaloRetornoSegundos)
         : null;
 
+    const cf = (request as any)?.cf || {};
+    const origemGeo = resolverOrigemGeograficaAcesso({
+      cfCountry: cf.country || request.headers.get('cf-ipcountry'),
+      cfCity: cf.city || request.headers.get('cf-ipcity'),
+      cfRegion: cf.regionCode || cf.region || request.headers.get('cf-region-code'),
+      cfLatitude: cf.latitude || request.headers.get('cf-iplatitude'),
+      cfLongitude: cf.longitude || request.headers.get('cf-iplongitude'),
+      timezone: String(body?.timezone ?? '').trim(),
+      idioma: String(body?.idioma ?? request.headers.get('accept-language') ?? '').trim(),
+    });
+
     await registrarPingVisitaLoja(db(), {
       empresaId: empresa.id,
       visitaToken,
       duracaoSegundos,
       intervaloRetornoSegundos,
+      paisCodigo: origemGeo.paisCodigo,
+      paisNome: origemGeo.paisNome,
+      cidade: origemGeo.cidade,
+      regiao: origemGeo.regiao,
+      latitude: origemGeo.latitude,
+      longitude: origemGeo.longitude,
     });
     return json({ ok: true });
   }

@@ -1005,6 +1005,7 @@ const catHeaderText =
     </style>
   </head>
   <body
+    data-empresa-codigo={empresa.codigo}
     data-sair-url={!bare && cliente ? `${baseUrl}/sair?expirado=1` : ''}
     data-idle-ms={
       Number(empresa.tempo_sessao_minutos) > 0
@@ -1386,6 +1387,85 @@ const catHeaderText =
           window.addEventListener(ev, resetIdleTimer, { passive: true });
         });
         resetIdleTimer();
+      })();
+
+      // Telemetria anônima da Loja Virtual: tempo médio de permanência e intervalo médio de retorno (sem individualizar por cliente)
+      (function () {
+        const empCod = document.body.getAttribute('data-empresa-codigo');
+        if (!empCod) return;
+
+        try {
+          const tokKey = 'loja_visita_tok_' + empCod;
+          const iniKey = 'loja_visita_ini_' + empCod;
+          const retKey = 'loja_visita_ret_' + empCod;
+          const ultKey = 'loja_ult_acesso_' + empCod;
+
+          const agora = Date.now();
+          let token = sessionStorage.getItem(tokKey);
+          let iniMs = Number(sessionStorage.getItem(iniKey) || '0');
+          let intervaloRetornoSeg = null;
+
+          if (!token || !iniMs) {
+            token =
+              'vis_' +
+              agora.toString(36) +
+              '_' +
+              Math.random().toString(36).slice(2, 10);
+            iniMs = agora;
+            sessionStorage.setItem(tokKey, token);
+            sessionStorage.setItem(iniKey, String(iniMs));
+
+            const ultAcessoMs = Number(localStorage.getItem(ultKey) || '0');
+            if (ultAcessoMs > 0 && agora > ultAcessoMs) {
+              const diffSeg = Math.round((agora - ultAcessoMs) / 1000);
+              // Considera como retorno uma nova sessão iniciada após pelo menos 60 segundos do acesso anterior
+              if (diffSeg >= 60) {
+                intervaloRetornoSeg = diffSeg;
+                sessionStorage.setItem(retKey, String(diffSeg));
+              }
+            }
+          } else {
+            const savedRet = sessionStorage.getItem(retKey);
+            if (savedRet) intervaloRetornoSeg = Number(savedRet);
+          }
+
+          localStorage.setItem(ultKey, String(agora));
+
+          function enviarPingVisita() {
+            const now = Date.now();
+            localStorage.setItem(ultKey, String(now));
+            const durSeg = Math.max(1, Math.round((now - iniMs) / 1000));
+            const payload = JSON.stringify({
+              empresa: empCod,
+              acao: 'ping_visita',
+              visitaToken: token,
+              duracaoSegundos: durSeg,
+              intervaloRetornoSegundos: intervaloRetornoSeg,
+            });
+
+            fetch('/api/loja-metricas', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              keepalive: true,
+              body: payload,
+            }).catch(() => {});
+          }
+
+          // Envia ping inicial após 2 segundos e atualiza a cada 15 segundos enquanto a aba estiver visível
+          setTimeout(enviarPingVisita, 2000);
+          setInterval(() => {
+            if (document.visibilityState === 'visible') {
+              enviarPingVisita();
+            }
+          }, 15000);
+
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+              enviarPingVisita();
+            }
+          });
+          window.addEventListener('pagehide', enviarPingVisita);
+        } catch {}
       })();
 
       // Registro do Service Worker PWA e botão de instalação do App da Loja

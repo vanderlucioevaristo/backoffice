@@ -1,7 +1,12 @@
 ---
 import LojaLayout from '../../../layouts/LojaLayout.astro';
 import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEOUT_SEC } from '../../../lib/auth';
-import { calcularFreteCorreios, iconeCategoriaLoja } from '../../../lib/empresa-service';
+import {
+  calcularFreteCorreios,
+  iconeCategoriaLoja,
+  registrarConsultaCategoria,
+  registrarInsercaoCarrinhoProduto,
+} from '../../../lib/empresa-service';
 import { formatMoney, formatQty, formatDateTimeBr, nowLocalIso, onlyDigits, parseNum } from '../../../lib/validate';
 
 const empCodigo = String(Astro.params.empresa ?? '').toLowerCase();
@@ -58,6 +63,8 @@ if (Astro.request.method === 'POST') {
       .bind(empresa.id, cliente.id, prod.id, novaQtd)
       .run();
 
+    await registrarInsercaoCarrinhoProduto(db(), empresa.id, prod.id, qtd);
+
     msgOk = `"${prod.nome}" foi adicionado ao seu carrinho!`;
   }
 }
@@ -89,6 +96,7 @@ const where = ['p.empresa_id = ?', 'p.ativo = 1', 'p.estoque_atual >= 1'];
 const args: unknown[] = [empresa.id];
 
 if (cat) {
+  await registrarConsultaCategoria(db(), empresa.id, cat);
   if (cat === 'Geral') {
     where.push("(p.categoria IS NULL OR TRIM(p.categoria) = '' OR p.categoria = 'Geral')");
   } else {
@@ -532,6 +540,23 @@ const baseUrl = `/loja/${empCodigo}`;
     mQtd.value = '1';
     dlg.showModal();
     setTimeout(() => mQtd.focus(), 40);
+
+    // Registra a visualização do produto na telemetria do Dashboard
+    try {
+      const empCod = document.body.getAttribute('data-empresa-codigo') || '';
+      if (empCod && d.id) {
+        fetch('/api/loja-metricas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          keepalive: true,
+          body: JSON.stringify({
+            empresa: empCod,
+            acao: 'visualizar_produto',
+            produtoId: Number(d.id),
+          }),
+        }).catch(() => {});
+      }
+    } catch {}
   }
 
   document.querySelectorAll('.prod-mini').forEach((card) => {

@@ -27,6 +27,11 @@ import {
   validarUrlExternaSegura,
   ICONES_CATEGORIAS_COMUNS,
   salvarCategoriaLoja,
+  registrarVisualizacaoProduto,
+  registrarInsercaoCarrinhoProduto,
+  registrarConsultaCategoria,
+  registrarPingVisitaLoja,
+  obterMetricasDashboardLoja,
   gerarManifestoPwaLoja,
   IDLE_TIMEOUT_SEC,
   IDLE_TIMEOUT_MS,
@@ -645,5 +650,81 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(row.nome, 'Games & Retrô');
     assert.equal(row.icone, '🕹️');
     assert.equal(row.ordem, 2);
+  });
+
+  test('dashboard: consolida visualizações de produtos, inserções no carrinho, vendas efetivadas, categorias mais consultadas e médias anônimas de permanência e retorno', async () => {
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'loja-dash',
+      razao: 'LOJA DASHBOARD LTDA',
+      nome: 'Admin Dash',
+      login: 'admin',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+    const empId = cad.empresaId!;
+
+    const prod1 = await ctx.d1
+      .prepare(
+        "INSERT INTO produtos (empresa_id, codigo, nome, categoria, preco_venda, estoque_atual, ativo) VALUES (?, 'P1', 'Smartphone X', 'Celulares e Smartphones', 2000, 10, 1) RETURNING id",
+      )
+      .bind(empId)
+      .first<{ id: number }>();
+
+    const prod2 = await ctx.d1
+      .prepare(
+        "INSERT INTO produtos (empresa_id, codigo, nome, categoria, preco_venda, estoque_atual, ativo) VALUES (?, 'P2', 'Fone Bluetooth', 'Áudio e Som', 300, 15, 1) RETURNING id",
+      )
+      .bind(empId)
+      .first<{ id: number }>();
+
+    // Visualizações e inserções no carrinho
+    await registrarVisualizacaoProduto(ctx.d1, empId, prod1!.id);
+    await registrarVisualizacaoProduto(ctx.d1, empId, prod1!.id);
+    await registrarVisualizacaoProduto(ctx.d1, empId, prod1!.id);
+    await registrarVisualizacaoProduto(ctx.d1, empId, prod2!.id);
+
+    await registrarInsercaoCarrinhoProduto(ctx.d1, empId, prod1!.id, 2);
+    await registrarConsultaCategoria(ctx.d1, empId, 'Celulares e Smartphones');
+
+    // Simula uma venda efetivada para prod1
+    const cli = await ctx.d1
+      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente Dash', 1) RETURNING id")
+      .bind(empId)
+      .first<{ id: number }>();
+
+    const ped = await ctx.d1
+      .prepare("INSERT INTO loja_pedidos (empresa_id, parceiro_id, valor_total, status) VALUES (?, ?, 4000, 'entregue') RETURNING id")
+      .bind(empId, cli!.id)
+      .first<{ id: number }>();
+
+    await ctx.d1
+      .prepare('INSERT INTO loja_pedidos_itens (empresa_id, pedido_id, produto_id, quantidade, preco_unitario, subtotal) VALUES (?, ?, ?, 2, 2000, 4000)')
+      .bind(empId, ped!.id, prod1!.id)
+      .run();
+
+    // Pings anônimos de visitas (sem individualizar por cliente):
+    // Visita 1: 120s de permanência
+    // Visita 2: 240s de permanência, retornou após 3600s (1h)
+    await registrarPingVisitaLoja(ctx.d1, {
+      empresaId: empId,
+      visitaToken: 'vis_teste_anonima_001',
+      duracaoSegundos: 120,
+      intervaloRetornoSegundos: null,
+    });
+    await registrarPingVisitaLoja(ctx.d1, {
+      empresaId: empId,
+      visitaToken: 'vis_teste_anonima_002',
+      duracaoSegundos: 240,
+      intervaloRetornoSegundos: 3600,
+    });
+
+    const dash = await obterMetricasDashboardLoja(ctx.d1, empId);
+    assert.equal(dash.resumo.totalVisualizacoes, 4);
+    assert.equal(dash.resumo.totalInsercoesCarrinho, 2);
+    assert.equal(dash.resumo.totalUnidadesVendidas, 2);
+    assert.equal(dash.resumo.totalValorVendido, 4000);
+    assert.equal(dash.resumo.mediaPermanenciaSegundos, 180); // média entre 120s e 240s
+    assert.equal(dash.resumo.mediaIntervaloRetornoSegundos, 3600);
+    assert.equal(dash.categoriasMaisConsultadas[0].categoria, 'Celulares e Smartphones');
   });
 });

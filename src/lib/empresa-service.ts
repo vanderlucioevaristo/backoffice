@@ -1538,6 +1538,301 @@ export async function salvarCategoriaLoja(
   return { ok: true, id: ins?.id };
 }
 
+export async function registrarConsultaCategoria(
+  database: any,
+  empresaId: number,
+  categoriaRaw?: string | null,
+): Promise<void> {
+  const cat = String(categoriaRaw ?? '').trim() || 'Geral';
+  try {
+    await database
+      .prepare(
+        `INSERT INTO loja_metricas_categorias (empresa_id, categoria, consultas, atualizado_em)
+         VALUES (?, ?, 1, datetime('now'))
+         ON CONFLICT (empresa_id, categoria)
+         DO UPDATE SET consultas = loja_metricas_categorias.consultas + 1,
+                       atualizado_em = datetime('now')`,
+      )
+      .bind(empresaId, cat)
+      .run();
+  } catch {
+    // Ignora falha silenciosamente caso tabela ainda não exista
+  }
+}
+
+export async function registrarVisualizacaoProduto(
+  database: any,
+  empresaId: number,
+  produtoId: number,
+): Promise<void> {
+  if (!empresaId || !produtoId) return;
+  try {
+    const prod = await database
+      .prepare('SELECT id, categoria FROM produtos WHERE id = ? AND empresa_id = ?')
+      .bind(produtoId, empresaId)
+      .first();
+    if (!prod) return;
+
+    await database
+      .prepare('UPDATE produtos SET visualizacoes = COALESCE(visualizacoes, 0) + 1 WHERE id = ? AND empresa_id = ?')
+      .bind(produtoId, empresaId)
+      .run();
+
+    await registrarConsultaCategoria(database, empresaId, prod.categoria);
+  } catch {
+    // Ignora falha silenciosamente
+  }
+}
+
+export async function registrarInsercaoCarrinhoProduto(
+  database: any,
+  empresaId: number,
+  produtoId: number,
+  quantidade = 1,
+): Promise<void> {
+  if (!empresaId || !produtoId) return;
+  const inc = Math.max(1, Math.round(Number(quantidade) || 1));
+  try {
+    const prod = await database
+      .prepare('SELECT id, categoria FROM produtos WHERE id = ? AND empresa_id = ?')
+      .bind(produtoId, empresaId)
+      .first();
+    if (!prod) return;
+
+    await database
+      .prepare(
+        'UPDATE produtos SET insercoes_carrinho = COALESCE(insercoes_carrinho, 0) + ? WHERE id = ? AND empresa_id = ?',
+      )
+      .bind(inc, produtoId, empresaId)
+      .run();
+
+    await registrarConsultaCategoria(database, empresaId, prod.categoria);
+  } catch {
+    // Ignora falha silenciosamente
+  }
+}
+
+/**
+ * Registra ou atualiza o tempo de permanência de uma visita na loja e o intervalo desde a última visita
+ * (de forma 100% agregada/anônima por sessão de visita, sem vincular nem individualizar por cliente).
+ */
+export async function registrarPingVisitaLoja(
+  database: any,
+  dados: {
+    empresaId: number;
+    visitaToken: string;
+    duracaoSegundos: number;
+    intervaloRetornoSegundos?: number | null;
+  },
+): Promise<void> {
+  const token = String(dados.visitaToken ?? '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 64);
+  if (!dados.empresaId || token.length < 8) return;
+
+  const dur = Math.max(0, Math.min(86400, Math.round(Number(dados.duracaoSegundos) || 0)));
+  const retRaw = dados.intervaloRetornoSegundos;
+  const ret =
+    retRaw !== null && retRaw !== undefined && Number(retRaw) > 0
+      ? Math.max(1, Math.min(365 * 86400, Math.round(Number(retRaw))))
+      : null;
+
+  try {
+    await database
+      .prepare(
+        `INSERT INTO loja_visitas_metricas
+           (visita_token, empresa_id, duracao_segundos, intervalo_retorno_segundos, iniciado_em, atualizado_em)
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT (visita_token)
+         DO UPDATE SET
+           duracao_segundos = MAX(loja_visitas_metricas.duracao_segundos, excluded.duracao_segundos),
+           intervalo_retorno_segundos = COALESCE(loja_visitas_metricas.intervalo_retorno_segundos, excluded.intervalo_retorno_segundos),
+           atualizado_em = datetime('now')`,
+      )
+      .bind(token, dados.empresaId, dur, ret)
+      .run();
+  } catch {
+    // Ignora falha silenciosamente
+  }
+}
+
+export function formatarDuracaoHumana(segundosRaw?: number | null): string {
+  const seg = Math.max(0, Math.round(Number(segundosRaw) || 0));
+  if (seg === 0) return '0s';
+  const dias = Math.floor(seg / 86400);
+  const horas = Math.floor((seg % 86400) / 3600);
+  const minutos = Math.floor((seg % 3600) / 60);
+  const segundos = seg % 60;
+
+  const partes: string[] = [];
+  if (dias > 0) partes.push(`${dias}d`);
+  if (horas > 0) partes.push(`${horas}h`);
+  if (minutos > 0) partes.push(`${minutos}m`);
+  if (segundos > 0 && dias === 0) partes.push(`${segundos}s`);
+  return partes.join(' ') || '0s';
+}
+
+export async function obterMetricasDashboardLoja(database: any, empresaId: number) {
+  // 1. Produtos com contadores de visualizações, inserções no carrinho e vendas efetivadas
+  const { results: produtosMetricas } = await database
+    .prepare(
+      `SELECT p.id, p.codigo, p.nome, p.foto, p.unidade, p.preco_venda, p.estoque_atual, p.ativo,
+              COALESCE(NULLIF(TRIM(p.categoria), ''), 'Geral') AS categoria,
+              COALESCE(p.visualizacoes, 0) AS visualizacoes,
+              COALESCE(p.insercoes_carrinho, 0) AS insercoes_carrinho,
+              COALESCE(SUM(CASE WHEN lp.id IS NOT NULL AND lp.status <> 'cancelado' THEN i.quantidade ELSE 0 END), 0) AS vendas_quantidade,
+              COUNT(DISTINCT CASE WHEN lp.id IS NOT NULL AND lp.status <> 'cancelado' THEN lp.id ELSE NULL END) AS vendas_pedidos,
+              COALESCE(SUM(CASE WHEN lp.id IS NOT NULL AND lp.status <> 'cancelado' THEN i.subtotal ELSE 0 END), 0) AS vendas_valor
+         FROM produtos p
+         LEFT JOIN loja_pedidos_itens i ON i.produto_id = p.id AND i.empresa_id = p.empresa_id
+         LEFT JOIN loja_pedidos lp ON lp.id = i.pedido_id AND lp.empresa_id = p.empresa_id
+        WHERE p.empresa_id = ?
+        GROUP BY p.id
+        ORDER BY vendas_quantidade DESC, p.insercoes_carrinho DESC, p.visualizacoes DESC, p.nome COLLATE NOCASE ASC`,
+    )
+    .bind(empresaId)
+    .all();
+
+  // 2. Categorias mais consultadas (combinando consultas diretas à categoria + visualizações/carrinho/vendas dos produtos daquela categoria)
+  const { results: categoriasConsultasRows } = await database
+    .prepare(
+      `SELECT categoria, consultas, atualizado_em
+         FROM loja_metricas_categorias
+        WHERE empresa_id = ?`,
+    )
+    .bind(empresaId)
+    .all();
+
+  const { results: categoriasCadRows } = await database
+    .prepare('SELECT nome, icone FROM categorias WHERE empresa_id = ?')
+    .bind(empresaId)
+    .all();
+
+  const mapaConsultasDiretas = new Map<string, number>();
+  for (const r of categoriasConsultasRows || []) {
+    const k = String(r.categoria || 'Geral').trim().toLowerCase();
+    mapaConsultasDiretas.set(k, (mapaConsultasDiretas.get(k) || 0) + Number(r.consultas || 0));
+  }
+
+  const mapaIconesCat = new Map<string, string>();
+  for (const c of categoriasCadRows || []) {
+    mapaIconesCat.set(String(c.nome || '').trim().toLowerCase(), String(c.icone || ''));
+  }
+
+  const mapaCategorias = new Map<
+    string,
+    {
+      categoria: string;
+      icone: string;
+      consultas: number;
+      visualizacoesProdutos: number;
+      insercoesCarrinho: number;
+      vendasEfetivadas: number;
+      valorVendido: number;
+      qtdProdutos: number;
+    }
+  >();
+
+  for (const p of produtosMetricas || []) {
+    const nomeCat = String(p.categoria || 'Geral').trim() || 'Geral';
+    const key = nomeCat.toLowerCase();
+    const existente = mapaCategorias.get(key) || {
+      categoria: nomeCat,
+      icone: iconeCategoriaLoja(nomeCat, mapaIconesCat.get(key)),
+      consultas: mapaConsultasDiretas.get(key) || 0,
+      visualizacoesProdutos: 0,
+      insercoesCarrinho: 0,
+      vendasEfetivadas: 0,
+      valorVendido: 0,
+      qtdProdutos: 0,
+    };
+    existente.visualizacoesProdutos += Number(p.visualizacoes || 0);
+    existente.insercoesCarrinho += Number(p.insercoes_carrinho || 0);
+    existente.vendasEfetivadas += Number(p.vendas_quantidade || 0);
+    existente.valorVendido += Number(p.vendas_valor || 0);
+    existente.qtdProdutos += 1;
+    mapaCategorias.set(key, existente);
+  }
+
+  // Inclui categorias consultadas que eventualmente ainda não tenham produtos listados
+  for (const r of categoriasConsultasRows || []) {
+    const nomeCat = String(r.categoria || 'Geral').trim() || 'Geral';
+    const key = nomeCat.toLowerCase();
+    if (!mapaCategorias.has(key)) {
+      mapaCategorias.set(key, {
+        categoria: nomeCat,
+        icone: iconeCategoriaLoja(nomeCat, mapaIconesCat.get(key)),
+        consultas: Number(r.consultas || 0),
+        visualizacoesProdutos: 0,
+        insercoesCarrinho: 0,
+        vendasEfetivadas: 0,
+        valorVendido: 0,
+        qtdProdutos: 0,
+      });
+    }
+  }
+
+  const categoriasMaisConsultadas = Array.from(mapaCategorias.values())
+    .map((c) => ({
+      ...c,
+      // Total de consultas da categoria considera cliques na categoria ou visualizações diretas dos itens dela
+      totalConsultas: Math.max(c.consultas, c.visualizacoesProdutos),
+    }))
+    .sort(
+      (a, b) =>
+        b.totalConsultas - a.totalConsultas ||
+        b.insercoesCarrinho - a.insercoesCarrinho ||
+        b.vendasEfetivadas - a.vendasEfetivadas ||
+        a.categoria.localeCompare(b.categoria),
+    );
+
+  // 3. Média de permanência no site e média de intervalo de retorno (sem individualizar por cliente)
+  const visitasStats = await database
+    .prepare(
+      `SELECT COUNT(*) AS total_visitas,
+              COALESCE(AVG(CASE WHEN duracao_segundos > 0 THEN duracao_segundos ELSE NULL END), 0) AS media_permanencia_seg,
+              COALESCE(AVG(CASE WHEN intervalo_retorno_segundos > 0 THEN intervalo_retorno_segundos ELSE NULL END), 0) AS media_retorno_seg,
+              COUNT(CASE WHEN intervalo_retorno_segundos > 0 THEN 1 ELSE NULL END) AS total_retornos
+         FROM loja_visitas_metricas
+        WHERE empresa_id = ?`,
+    )
+    .bind(empresaId)
+    .first();
+
+  const totalVisualizacoes = (produtosMetricas || []).reduce(
+    (acc: number, p: any) => acc + Number(p.visualizacoes || 0),
+    0,
+  );
+  const totalInsercoesCarrinho = (produtosMetricas || []).reduce(
+    (acc: number, p: any) => acc + Number(p.insercoes_carrinho || 0),
+    0,
+  );
+  const totalUnidadesVendidas = (produtosMetricas || []).reduce(
+    (acc: number, p: any) => acc + Number(p.vendas_quantidade || 0),
+    0,
+  );
+  const totalValorVendido = (produtosMetricas || []).reduce(
+    (acc: number, p: any) => acc + Number(p.vendas_valor || 0),
+    0,
+  );
+
+  return {
+    resumo: {
+      totalVisualizacoes,
+      totalInsercoesCarrinho,
+      totalUnidadesVendidas,
+      totalValorVendido,
+      totalVisitas: Number(visitasStats?.total_visitas || 0),
+      totalRetornos: Number(visitasStats?.total_retornos || 0),
+      mediaPermanenciaSegundos: Math.round(Number(visitasStats?.media_permanencia_seg || 0)),
+      mediaIntervaloRetornoSegundos: Math.round(Number(visitasStats?.media_retorno_seg || 0)),
+    },
+    produtos: produtosMetricas || [],
+    categoriasMaisConsultadas,
+  };
+}
+
 export function gerarManifestoPwaLoja(empresa: {
   codigo: string;
   nome: string;

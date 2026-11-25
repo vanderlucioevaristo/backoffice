@@ -297,6 +297,22 @@ export async function ensureSchema(): Promise<void> {
         criado_em TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (empresa_id, nome)
       )`,
+      `CREATE TABLE IF NOT EXISTS loja_metricas_categorias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        categoria TEXT NOT NULL,
+        consultas INTEGER NOT NULL DEFAULT 0,
+        atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (empresa_id, categoria)
+      )`,
+      `CREATE TABLE IF NOT EXISTS loja_visitas_metricas (
+        visita_token TEXT PRIMARY KEY,
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        duracao_segundos INTEGER NOT NULL DEFAULT 0,
+        intervalo_retorno_segundos INTEGER,
+        iniciado_em TEXT NOT NULL DEFAULT (datetime('now')),
+        atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
     ];
 
     for (const sql of tables) {
@@ -381,6 +397,8 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN email_webhook_url TEXT",
       "ALTER TABLE empresas ADD COLUMN loja_topo_imagem TEXT",
       "ALTER TABLE empresas ADD COLUMN cor_texto_categorias_topo TEXT",
+      "ALTER TABLE produtos ADD COLUMN visualizacoes INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE produtos ADD COLUMN insercoes_carrinho INTEGER NOT NULL DEFAULT 0",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});

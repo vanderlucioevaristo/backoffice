@@ -27,6 +27,8 @@ import {
   validarUrlExternaSegura,
   ICONES_CATEGORIAS_COMUNS,
   salvarCategoriaLoja,
+  alternarFavoritoLoja,
+  listarIdsFavoritosCliente,
   registrarVisualizacaoProduto,
   registrarInsercaoCarrinhoProduto,
   registrarConsultaCategoria,
@@ -745,5 +747,38 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(dash.produtos.length, 2);
     assert.equal(dash.categoriasMaisConsultadas.length, 2);
     assert.equal(dash.categoriasMaisConsultadas[0].categoria, 'Celulares e Smartphones');
+
+    // Testa favoritar e desfavoritar produtos pelo cliente na loja
+    const fav1 = await alternarFavoritoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli1!.id,
+      produtoId: prod1!.id,
+    });
+    assert.equal(fav1.ok, true);
+    assert.equal(fav1.favoritado, true);
+    assert.equal(fav1.totalFavoritos, 1);
+
+    const fav2 = await alternarFavoritoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli1!.id,
+      produtoId: prod2!.id,
+    });
+    assert.equal(fav2.ok, true);
+    assert.equal(fav2.favoritado, true);
+    assert.equal(fav2.totalFavoritos, 2);
+
+    const listaFavs = await listarIdsFavoritosCliente(ctx.d1, empId, cli1!.id);
+    assert.equal(listaFavs.length, 2);
+    assert.ok(listaFavs.includes(prod1!.id) && listaFavs.includes(prod2!.id));
+
+    // Ao clicar novamente no mesmo produto, remove dos favoritos
+    const desfav1 = await alternarFavoritoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli1!.id,
+      produtoId: prod1!.id,
+    });
+    assert.equal(desfav1.ok, true);
+    assert.equal(desfav1.favoritado, false);
+    assert.equal(desfav1.totalFavoritos, 1);
   });
 });

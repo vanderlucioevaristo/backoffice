@@ -34,6 +34,7 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     path.startsWith('/loja/') ||
     path === '/api/loja-chat' ||
     path === '/api/loja-metricas' ||
+    path === '/api/loja-favoritos' ||
     path === '/api/calcular-frete' ||
     path === '/api/consulta-cep' ||
     path === '/api/consulta-doc' ||

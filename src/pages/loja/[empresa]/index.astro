@@ -4,6 +4,7 @@ import { db, getLojaEmpresa, getSessionClient, CLIENT_SESSION_COOKIE, IDLE_TIMEO
 import {
   calcularFreteCorreios,
   iconeCategoriaLoja,
+  listarIdsFavoritosCliente,
   registrarConsultaCategoria,
   registrarInsercaoCarrinhoProduto,
 } from '../../../lib/empresa-service';
@@ -72,6 +73,10 @@ if (Astro.request.method === 'POST') {
 const sp = Astro.url.searchParams;
 const cat = (sp.get('cat') ?? '').trim();
 const q = (sp.get('q') ?? '').trim().slice(0, 80);
+const somenteFavoritos = sp.get('fav') === '1';
+
+const idsFavoritosList = await listarIdsFavoritosCliente(db(), empresa.id, cliente.id);
+const idsFavoritos = new Set<number>(idsFavoritosList);
 
 // Categorias que possuem ao menos 1 produto ativo com estoque >= 1 (com ícone personalizado do cadastro de categorias)
 const { results: categoriasRows } = await db()
@@ -107,6 +112,10 @@ if (cat) {
 if (q) {
   where.push('(p.nome LIKE ? OR p.descricao LIKE ? OR p.marca LIKE ? OR p.codigo LIKE ?)');
   args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+}
+if (somenteFavoritos) {
+  where.push('EXISTS (SELECT 1 FROM loja_favoritos lf WHERE lf.empresa_id = p.empresa_id AND lf.parceiro_id = ? AND lf.produto_id = p.id)');
+  args.push(cliente.id);
 }
 
 const agora = nowLocalIso();
@@ -275,11 +284,15 @@ const baseUrl = `/loja/${empCodigo}`;
 
   <div class="row" style="margin-bottom:12px">
     <div style="font-size:18px;font-weight:600">
-      {cat ? `Categoria: ${cat}` : 'Ofertas e Produtos em Estoque'}
+      {somenteFavoritos
+        ? '❤️ Meus Produtos Favoritos'
+        : cat
+          ? `Categoria: ${cat}`
+          : 'Ofertas e Produtos em Estoque'}
       <span class="muted" style="font-size:13px;font-weight:400"> ({produtos.length} resultado{produtos.length === 1 ? '' : 's'})</span>
     </div>
     <span class="spacer"></span>
-    {(q || cat) && <a class="btn sec" href={baseUrl} style="font-size:13px;padding:5px 10px">Limpar filtros</a>}
+    {(q || cat || somenteFavoritos) && <a class="btn sec" href={baseUrl} style="font-size:13px;padding:5px 10px">Limpar filtros</a>}
   </div>
 
   {ofertas.length > 0 && (
@@ -305,12 +318,14 @@ const baseUrl = `/loja/${empCodigo}`;
             ? Math.round(((of.preco_venda - of.preco_oferta) / of.preco_venda) * 100)
             : 0;
           const freteOf = calcularResumoFreteProduto(of, of.preco_oferta);
+          const ehFavOf = idsFavoritos.has(of.id);
           return (
             <div
               class="oferta-slide prod-mini"
               tabindex="0"
               role="button"
               data-id={of.id}
+              data-fav={ehFavOf ? '1' : '0'}
               data-codigo={of.codigo || ''}
               data-nome={of.nome}
               data-desc={of.descricao || ''}
@@ -326,7 +341,18 @@ const baseUrl = `/loja/${empCodigo}`;
             >
               <div class="oferta-top-badges">
                 <span class="oferta-tag">🔥 {of.titulo_oferta || 'Oferta Especial'}</span>
-                {percOff > 0 && <span class="oferta-off">{percOff}% OFF</span>}
+                <div style="display:flex;align-items:center;gap:4px">
+                  {percOff > 0 && <span class="oferta-off">{percOff}% OFF</span>}
+                  <button
+                    type="button"
+                    class={`fav-btn ${ehFavOf ? 'is-fav' : ''}`}
+                    style="position:static;width:24px;height:24px;font-size:13px;box-shadow:none"
+                    data-fav-id={of.id}
+                    title={ehFavOf ? 'Remover dos favoritos' : 'Guardar nos meus favoritos'}
+                  >
+                    {ehFavOf ? '❤️' : '🤍'}
+                  </button>
+                </div>
               </div>
 
               <div class="oferta-thumb">
@@ -374,9 +400,19 @@ const baseUrl = `/loja/${empCodigo}`;
   )}
 
   <div class="ml-cat-bar">
-    <a href={baseUrl} class={`ml-cat-chip ${!cat ? 'on' : ''}`}>
+    <a href={baseUrl} class={`ml-cat-chip ${!cat && !somenteFavoritos ? 'on' : ''}`}>
       <span class="cat-chip-ico" aria-hidden="true">{iconeCategoriaLoja('Todas')}</span>
       <span class="cat-chip-lbl">Todas</span>
+    </a>
+    <a
+      href={`${baseUrl}?fav=1`}
+      class={`ml-cat-chip ${somenteFavoritos ? 'on' : ''}`}
+      style={somenteFavoritos ? 'background:#e11d48;border-color:#e11d48;color:#fff' : 'border-color:#fecdd3;color:#be123c'}
+    >
+      <span class="cat-chip-ico" aria-hidden="true">❤️</span>
+      <span class="cat-chip-lbl">
+        Favoritos <span class="cat-chip-qtd" id="badge-qtd-favoritos">({idsFavoritos.size})</span>
+      </span>
     </a>
     {categoriasRows.map((c) => (
       <a
@@ -399,12 +435,14 @@ const baseUrl = `/loja/${empCodigo}`;
         const precoFinal = p.preco_oferta !== null && p.preco_oferta !== undefined ? p.preco_oferta : p.preco_venda;
         const temDesc = p.preco_oferta !== null && p.preco_oferta !== undefined && p.preco_oferta < p.preco_venda;
         const freteProd = calcularResumoFreteProduto(p, precoFinal);
+        const ehFav = idsFavoritos.has(p.id);
         return (
           <div
             class="ml-card prod-mini"
             tabindex="0"
             role="button"
             data-id={p.id}
+            data-fav={ehFav ? '1' : '0'}
             data-codigo={p.codigo || ''}
             data-nome={p.nome}
             data-desc={p.descricao || ''}
@@ -418,6 +456,15 @@ const baseUrl = `/loja/${empCodigo}`;
             data-foto={p.foto || ''}
             title="Clique para expandir e adicionar ao carrinho"
           >
+            <button
+              type="button"
+              class={`fav-btn ${ehFav ? 'is-fav' : ''}`}
+              data-fav-id={p.id}
+              aria-label={ehFav ? 'Remover dos favoritos' : 'Guardar nos favoritos'}
+              title={ehFav ? 'Remover dos meus favoritos' : 'Guardar nos meus favoritos'}
+            >
+              {ehFav ? '❤️' : '🤍'}
+            </button>
             <div class="ml-card-thumb">
               {p.foto ? <img src={p.foto} alt={p.nome} loading="lazy" /> : <div class="ml-no-img">📦</div>}
             </div>
@@ -474,7 +521,15 @@ const baseUrl = `/loja/${empCodigo}`;
           <label for="m-qtd">Quantidade</label>
           <input id="m-qtd" name="quantidade" type="number" min="1" step="1" value="1" required />
         </div>
-        <div class="row" style="gap:8px">
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button
+            type="button"
+            class="btn sec"
+            id="btn-modal-fav"
+            style="border-color:#fecdd3;color:#be123c;font-weight:600"
+          >
+            🤍 Favoritar
+          </button>
           <button type="button" class="btn sec" id="btn-fechar-prod">Fechar</button>
           <button type="submit" style="font-weight:600">🛒 Adicionar ao carrinho</button>
         </div>
@@ -497,10 +552,71 @@ const baseUrl = `/loja/${empCodigo}`;
   const mFrete = document.getElementById('m-frete');
   const mDesc = document.getElementById('m-desc');
   const mQtd = document.getElementById('m-qtd');
+  const btnModalFav = document.getElementById('btn-modal-fav');
+  const badgeQtdFav = document.getElementById('badge-qtd-favoritos');
+
+  function atualizarEstadoVisualFavorito(prodId, favoritado, totalFavoritos) {
+    document.querySelectorAll(`[data-fav-id="${prodId}"]`).forEach((btn) => {
+      btn.classList.toggle('is-fav', favoritado);
+      btn.textContent = favoritado ? '❤️' : '🤍';
+      btn.setAttribute('title', favoritado ? 'Remover dos meus favoritos' : 'Guardar nos meus favoritos');
+    });
+    document.querySelectorAll(`.prod-mini[data-id="${prodId}"]`).forEach((card) => {
+      card.setAttribute('data-fav', favoritado ? '1' : '0');
+    });
+    if (btnModalFav && Number(mId.value) === Number(prodId)) {
+      btnModalFav.textContent = favoritado ? '❤️ Favoritado' : '🤍 Favoritar';
+      btnModalFav.style.background = favoritado ? '#fff1f2' : '';
+    }
+    if (badgeQtdFav && typeof totalFavoritos === 'number') {
+      badgeQtdFav.textContent = `(${totalFavoritos})`;
+    }
+  }
+
+  async function alternarFavorito(prodId) {
+    const empCod = document.body.getAttribute('data-empresa-codigo') || '';
+    if (!empCod || !prodId) return;
+    try {
+      const resp = await fetch('/api/loja-favoritos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresa: empCod, produtoId: Number(prodId) }),
+      });
+      const data = await resp.json();
+      if (data && data.ok) {
+        atualizarEstadoVisualFavorito(prodId, Boolean(data.favoritado), data.totalFavoritos);
+      }
+    } catch {}
+  }
+
+  document.querySelectorAll('.fav-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pid = Number(btn.getAttribute('data-fav-id'));
+      if (pid > 0) alternarFavorito(pid);
+    });
+  });
+
+  if (btnModalFav) {
+    btnModalFav.addEventListener('click', () => {
+      const pid = Number(mId.value);
+      if (pid > 0) alternarFavorito(pid);
+    });
+  }
+
+  if (btnFechar && dlg) {
+    btnFechar.addEventListener('click', () => dlg.close());
+  }
 
   function abrirProduto(card) {
     const d = card.dataset;
     mId.value = d.id;
+    if (btnModalFav) {
+      const isFav = card.getAttribute('data-fav') === '1';
+      btnModalFav.textContent = isFav ? '❤️ Favoritado' : '🤍 Favoritar';
+      btnModalFav.style.background = isFav ? '#fff1f2' : '';
+    }
     mCat.textContent = d.codigo ? `${d.cat} · Cód. ${d.codigo}` : d.cat;
     mNome.textContent = d.nome;
     if (mPrecoAntigo) {

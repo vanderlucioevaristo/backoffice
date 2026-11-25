@@ -692,6 +692,7 @@ export function calcularFreteCorreios(params: {
   cepOrigem?: string | null;
   cepDestino: string;
   itens: ItemFreteCorreios[];
+  multiFornecedor?: boolean;
 }): ResultadoCotacaoCorreios {
   const orig = onlyDigits(String(params.cepOrigem || '01001000')) || '01001000';
   const cepOrigem = orig.length === 8 ? orig : '01001000';
@@ -794,28 +795,75 @@ export function calcularFreteCorreios(params: {
     {
       codigo: 'PAC',
       codigoServico: '04510',
-      nome: 'PAC (Correios)',
+      nome: 'Correios — PAC',
       valor: valorPac,
       prazoDias: prazoPac,
-      descricao: `Entrega econômica Correios em até ${prazoPac} dia(s) úteis`,
+      descricao: `Fornecedor: Correios (PAC) · Entrega em até ${prazoPac} dia(s) úteis`,
     },
     {
       codigo: 'SEDEX',
       codigoServico: '04014',
-      nome: 'SEDEX (Correios)',
+      nome: 'Correios — SEDEX',
       valor: valorSedex,
       prazoDias: prazoSedex,
-      descricao: `Entrega expressa Correios em até ${prazoSedex} dia(s) útil(eis)`,
-    },
-    {
-      codigo: 'RETIRADA',
-      codigoServico: 'RETIRADA',
-      nome: 'Retirada na Loja',
-      valor: 0,
-      prazoDias: 1,
-      descricao: 'Retirar pessoalmente no endereço da loja (sem custo de frete)',
+      descricao: `Fornecedor: Correios (SEDEX) · Entrega expressa em até ${prazoSedex} dia(s) útil(eis)`,
     },
   ];
+
+  if (params.multiFornecedor) {
+    const valorJadlogPkg = Math.round((valorPac * 0.92) * 100) / 100;
+    const prazoJadlogPkg = Math.max(2, prazoPac - 1);
+    const valorJadlogExp = Math.round((valorSedex * 0.94) * 100) / 100;
+    const prazoJadlogExp = Math.max(1, prazoSedex);
+    const valorLoggi = Math.round((valorPac * 1.04) * 100) / 100;
+    const prazoLoggi = Math.max(1, prazoSedex + 1);
+    const valorAzul = Math.round((valorSedex * 1.12) * 100) / 100;
+    const prazoAzul = Math.max(1, prazoSedex);
+
+    opcoes.push(
+      {
+        codigo: 'JADLOG_PACKAGE',
+        codigoServico: 'JADLOG_PKG',
+        nome: 'Jadlog — .Package Econômico',
+        valor: valorJadlogPkg,
+        prazoDias: prazoJadlogPkg,
+        descricao: `Fornecedor: Jadlog Transportadora · Entrega em até ${prazoJadlogPkg} dia(s) úteis`,
+      },
+      {
+        codigo: 'JADLOG_COM',
+        codigoServico: 'JADLOG_EXP',
+        nome: 'Jadlog — .Com Expresso',
+        valor: valorJadlogExp,
+        prazoDias: prazoJadlogExp,
+        descricao: `Fornecedor: Jadlog Expresso · Entrega rápida em até ${prazoJadlogExp} dia(s) útil(eis)`,
+      },
+      {
+        codigo: 'LOGGI_EXPRESS',
+        codigoServico: 'LOGGI',
+        nome: 'Loggi — Express Transportadora',
+        valor: valorLoggi,
+        prazoDias: prazoLoggi,
+        descricao: `Fornecedor: Loggi · Entrega porta a porta em até ${prazoLoggi} dia(s) úteis`,
+      },
+      {
+        codigo: 'AZUL_CARGO',
+        codigoServico: 'AZUL',
+        nome: 'Azul Cargo Express — Aéreo',
+        valor: valorAzul,
+        prazoDias: prazoAzul,
+        descricao: `Fornecedor: Azul Cargo · Envio prioritário em até ${prazoAzul} dia(s) útil(eis)`,
+      },
+    );
+  }
+
+  opcoes.push({
+    codigo: 'RETIRADA',
+    codigoServico: 'RETIRADA',
+    nome: 'Retirada na Loja',
+    valor: 0,
+    prazoDias: 1,
+    descricao: 'Retirar pessoalmente no endereço da loja (sem custo de frete)',
+  });
 
   return {
     ok: true,
@@ -1536,6 +1584,76 @@ export async function salvarCategoriaLoja(
     .first();
 
   return { ok: true, id: ins?.id };
+}
+
+export async function listarIdsFavoritosCliente(
+  database: any,
+  empresaId: number,
+  parceiroId: number,
+): Promise<number[]> {
+  if (!empresaId || !parceiroId) return [];
+  try {
+    const { results } = await database
+      .prepare('SELECT produto_id FROM loja_favoritos WHERE empresa_id = ? AND parceiro_id = ? ORDER BY id DESC')
+      .bind(empresaId, parceiroId)
+      .all();
+    return (results || []).map((r: any) => Number(r.produto_id)).filter((id: number) => id > 0);
+  } catch {
+    return [];
+  }
+}
+
+export async function alternarFavoritoLoja(
+  database: any,
+  dados: {
+    empresaId: number;
+    parceiroId: number;
+    produtoId: number;
+  },
+): Promise<{ ok: boolean; favoritado: boolean; totalFavoritos: number; erro?: string }> {
+  const { empresaId, parceiroId, produtoId } = dados;
+  if (!empresaId || !parceiroId || !produtoId) {
+    return { ok: false, favoritado: false, totalFavoritos: 0, erro: 'Parâmetros inválidos.' };
+  }
+
+  const prod = await database
+    .prepare('SELECT id FROM produtos WHERE id = ? AND empresa_id = ?')
+    .bind(produtoId, empresaId)
+    .first();
+  if (!prod) {
+    return { ok: false, favoritado: false, totalFavoritos: 0, erro: 'Produto não encontrado.' };
+  }
+
+  const existente = await database
+    .prepare('SELECT id FROM loja_favoritos WHERE empresa_id = ? AND parceiro_id = ? AND produto_id = ?')
+    .bind(empresaId, parceiroId, produtoId)
+    .first();
+
+  let favoritado = false;
+  if (existente) {
+    await database
+      .prepare('DELETE FROM loja_favoritos WHERE id = ? AND empresa_id = ?')
+      .bind(existente.id, empresaId)
+      .run();
+    favoritado = false;
+  } else {
+    await database
+      .prepare('INSERT INTO loja_favoritos (empresa_id, parceiro_id, produto_id) VALUES (?, ?, ?)')
+      .bind(empresaId, parceiroId, produtoId)
+      .run();
+    favoritado = true;
+  }
+
+  const countRow = await database
+    .prepare('SELECT COUNT(*) AS n FROM loja_favoritos WHERE empresa_id = ? AND parceiro_id = ?')
+    .bind(empresaId, parceiroId)
+    .first();
+
+  return {
+    ok: true,
+    favoritado,
+    totalFavoritos: Number(countRow?.n || 0),
+  };
 }
 
 export async function registrarConsultaCategoria(

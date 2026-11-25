@@ -300,6 +300,36 @@ const catHeaderText =
         cursor: pointer;
         transition: box-shadow .16s ease, transform .16s ease;
         overflow: hidden;
+        position: relative;
+      }
+      .fav-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 4;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        background: rgba(255, 255, 255, 0.92);
+        color: #64748b;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
+        transition: transform 0.15s ease, background 0.15s ease;
+      }
+      .fav-btn:hover {
+        transform: scale(1.12);
+        background: #ffffff;
+      }
+      .fav-btn.is-fav {
+        background: #fff1f2;
+        border-color: #fecdd3;
+        color: #e11d48;
       }
       .ml-card:hover {
         box-shadow: 0 7px 16px 0 rgba(0,0,0,.18);
@@ -1044,6 +1074,7 @@ const catHeaderText =
                 Olá, <strong>{cliente.nome.split(' ')[0]}</strong>
               </a>
               <a href={`${baseUrl}/meu-cadastro`}>Meu Cadastro</a>
+              <a href={`${baseUrl}?fav=1`} title="Ver meus produtos favoritos">❤️ Favoritos</a>
               {empresa.agenda_ativa === 1 && (
                 <a href={`${baseUrl}/agenda`} style="font-weight:700">📅 {empresa.agenda_menu_texto || 'Agenda'}</a>
               )}

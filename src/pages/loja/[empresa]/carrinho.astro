@@ -409,6 +409,12 @@ const freteInicial =
     : cotacaoInicial?.ok
       ? cotacaoInicial.opcoes[0]?.valor ?? 0
       : 0;
+const fornecedorFreteInicial =
+  empresa.frete_provedor === 'CEPCERTO'
+    ? 'Retirada na Loja'
+    : cotacaoInicial?.ok
+      ? cotacaoInicial.opcoes[0]?.nome ?? 'Correios'
+      : 'Retirada na Loja';
 const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantidade * Number(it.peso_kg || 0.3), 0) * 1000) / 1000;
 ---
 <LojaLayout title="Meu Carrinho" empresa={empresa} cliente={cliente} qtdCarrinho={qtdTotal}>
@@ -642,61 +648,50 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
         <!-- Bloco de Cálculo de Frete na confirmação do pedido (CEP Certo Multi-Fornecedor OU Somente Correios) -->
         {empresa.frete_provedor === 'CEPCERTO' ? (
           <div class="frete-box" style="border-color:#bae6fd;background:#f0f9ff">
-            <h3 style="margin:0 0 4px;font-size:16px;color:#0369a1">
-              🚚 Cálculo de Frete em Vários Fornecedores (CEP Certo)
-            </h3>
-            <p class="muted" style="margin:0 0 10px;font-size:12.5px">
-              Utilize o cotador abaixo para consultar o frete em múltiplas transportadoras. Dados do seu pacote:{' '}
-              <strong>Peso total: {pesoTotalCarrinho} kg</strong>
-              {cepEntrega ? <> · <strong>Seu CEP: {cepEntrega.replace(/^(\d{5})(\d{3})$/, '$1-$2')}</strong></> : ''}
-              {empresa.cep_origem ? <> · <strong>CEP Origem: {empresa.cep_origem}</strong></> : ''}.
-            </p>
-
-            <div
-              id="cepcerto-widget-wrap"
-              style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px"
-            >
-              <script
-                is:inline
-                src="https://cepcerto.com/widget_frete/"
-                data-public-key={
-                  empresa.cepcerto_public_key ||
-                  'pk_live_98e56b325596efba0c511533a46f05a3ceae960d091bc459'
-                }
-              ></script>
+            <div class="row" style="justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+              <div style="flex:1;min-width:240px">
+                <h3 style="margin:0 0 4px;font-size:16px;color:#0369a1">
+                  🚚 Frete e Entrega (Multi-Fornecedor · CEP Certo)
+                </h3>
+                <div id="resumo-frete-cepcerto-box" style="font-size:13.5px;color:#0f172a;margin-top:4px">
+                  <span class="muted">Clique no botão ao lado para informar seu CEP, comparar transportadoras e escolher o frete.</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="btn"
+                id="btn-abrir-dlg-cepcerto"
+                style="background:#0284c7;color:#fff;font-weight:700;padding:10px 18px;font-size:14px"
+              >
+                🚚 Calcular Frete
+              </button>
             </div>
 
-            <div class="grid">
-              <div class="c3">
-                <label>CEP de entrega</label>
-                <input
-                  name="cep_entrega"
-                  value={cepEntrega ? cepEntrega.replace(/^(\d{5})(\d{3})$/, '$1-$2') : ''}
-                  maxlength="9"
-                  placeholder="00000-000"
-                />
-              </div>
-              <div class="c5">
-                <label>Transportadora / Modalidade escolhida</label>
-                <input
-                  name="frete_modalidade_cepcerto"
-                  id="inp-mod-cepcerto"
-                  value="Frete CEP Certo"
-                  placeholder="Ex: Correios PAC, Jadlog, Loggi..."
-                />
-              </div>
-              <div class="c4">
-                <label>Valor do frete cotado (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="valor_frete_cepcerto"
-                  id="inp-val-cepcerto"
-                  value="0.00"
-                />
-              </div>
-            </div>
+            <!-- Campos ocultos preenchidos automaticamente ao clicar em Salvar no diálogo de cálculo -->
+            <input
+              type="hidden"
+              name="cep_entrega"
+              id="inp-cep-cepcerto"
+              value={cepEntrega ? cepEntrega.replace(/^(\d{5})(\d{3})$/, '$1-$2') : ''}
+            />
+            <input
+              type="hidden"
+              name="frete_modalidade_cepcerto"
+              id="inp-mod-cepcerto"
+              value="Retirada na Loja"
+            />
+            <input
+              type="hidden"
+              name="valor_frete_cepcerto"
+              id="inp-val-cepcerto"
+              value="0.00"
+            />
+            <input
+              type="hidden"
+              name="frete_prazo_cepcerto"
+              id="inp-prazo-cepcerto"
+              value="1"
+            />
           </div>
         ) : (
         <div class="frete-box">
@@ -747,6 +742,7 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
                     type="radio"
                     name="frete_codigo"
                     value={op.codigo}
+                    data-nome={op.nome}
                     data-valor={op.valor}
                     checked={idx === 0}
                   />
@@ -763,7 +759,7 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
               ))
             ) : (
               <label class="frete-card ativo">
-                <input type="radio" name="frete_codigo" value="RETIRADA" data-valor="0" checked />
+                <input type="radio" name="frete_codigo" value="RETIRADA" data-nome="Retirada na Loja" data-valor="0" checked />
                 <div style="flex:1">
                   <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px">
                     <span>🏪 Retirada na Loja</span>
@@ -830,28 +826,130 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
           </div>
         )}
 
-        <div class="grid">
-          <div class="c7">
-            <label>Observações do pedido (opcional)</label>
-            <input name="observacoes" placeholder="Ex.: Horário de preferência para entrega ou referência" />
+        <div class="frete-box" style="margin-bottom:16px">
+          <label
+            for="inp-observacoes-pedido"
+            style="display:block;font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px"
+          >
+            📝 Observações do Pedido (opcional)
+          </label>
+          <textarea
+            id="inp-observacoes-pedido"
+            name="observacoes"
+            rows="3"
+            placeholder="Ex.: Horário de preferência para entrega, ponto de referência, deixar na portaria ou instruções adicionais..."
+            style="width:100%;min-height:84px;padding:10px 12px;font-size:14px;line-height:1.45;border:1.5px solid #cbd5e1;border-radius:10px;background:#ffffff;resize:vertical"
+          ></textarea>
+        </div>
+
+        <div
+          style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;padding-top:10px;border-top:1px solid #e2e8f0"
+        >
+          <div class="muted" style="font-size:13px">
+            Confira o frete e a forma de pagamento selecionados antes de finalizar.
           </div>
-          <div class="c5" style="text-align:right">
-            <div class="muted" style="font-size:13px">
+          <div style="text-align:right;margin-left:auto">
+            <div class="muted" style="font-size:13.5px">
               Subtotal dos produtos: <strong>{formatMoney(totalCarrinho)}</strong>
             </div>
-            <div class="muted" style="font-size:13px;margin-top:2px">
-              Frete (Correios): <strong id="lbl-valor-frete">{formatMoney(freteInicial)}</strong>
+            <div class="muted" style="font-size:13.5px;margin-top:3px">
+              Frete (<span id="lbl-fornecedor-frete">{fornecedorFreteInicial}</span>):{' '}
+              <strong id="lbl-valor-frete">{formatMoney(freteInicial)}</strong>
             </div>
-            <div class="muted" style="margin-top:6px">Total do pedido</div>
-            <div id="lbl-total-pedido" style="font-size:24px;font-weight:800;color:var(--pr)">
+            <div class="muted" style="margin-top:6px;font-size:13px">Total do pedido</div>
+            <div id="lbl-total-pedido" style="font-size:26px;font-weight:800;color:var(--pr)">
               {formatMoney(totalCarrinho + freteInicial)}
             </div>
           </div>
         </div>
         <div class="row" style="justify-content:flex-end;margin-top:14px">
-          <button type="submit">✅ Confirmar e Finalizar Compra</button>
+          <button type="submit" style="padding:11px 22px;font-size:15px;font-weight:700">
+            ✅ Confirmar e Finalizar Compra
+          </button>
         </div>
       </form>
+
+      {empresa.frete_provedor === 'CEPCERTO' && (
+        <dialog
+          id="dlg-frete-cepcerto"
+          class="modal"
+          style="max-width:680px;width:calc(100vw - 24px);border:none;border-radius:16px;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.28)"
+        >
+          <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:14px">
+            <h2 style="margin:0;font-size:19px;color:#0369a1">🚚 Calcular Frete (Multi-Fornecedor · CEP Certo)</h2>
+            <button type="button" class="btn sec sm" id="btn-fechar-dlg-cepcerto">✕</button>
+          </div>
+
+          <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:12px;padding:16px;margin-bottom:14px">
+            <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+              <div style="flex:1 1 200px;min-width:185px">
+                <label style="display:block;font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">
+                  🏪 CEP de Origem (Loja)
+                </label>
+                <input
+                  readonly
+                  value={(empresa.cep_origem || '01001000').replace(/^(\d{5})(\d{3})$/, '$1-$2')}
+                  style="width:100%;height:44px;padding:10px 14px;font-size:16px;letter-spacing:0.5px;background:#e2e8f0;border:1.5px solid #94a3b8;border-radius:8px;font-weight:800;color:#0f172a"
+                />
+              </div>
+
+              <div style="flex:1 1 200px;min-width:185px">
+                <label
+                  for="inp-dlg-cep-destino"
+                  style="display:block;font-size:13px;font-weight:700;color:#0369a1;margin-bottom:6px"
+                >
+                  📍 CEP de Destino (Cliente) *
+                </label>
+                <input
+                  id="inp-dlg-cep-destino"
+                  value={cepEntrega ? cepEntrega.replace(/^(\d{5})(\d{3})$/, '$1-$2') : ''}
+                  maxlength="9"
+                  placeholder="00000-000"
+                  autofocus
+                  style="width:100%;height:44px;padding:10px 14px;font-size:16px;letter-spacing:0.5px;background:#ffffff;border:1.5px solid #0284c7;border-radius:8px;font-weight:700;color:#0f172a"
+                />
+              </div>
+
+              <div style="flex:0 0 auto">
+                <button
+                  type="button"
+                  class="btn"
+                  id="btn-dlg-calcular-cepcerto"
+                  style="height:44px;padding:0 22px;background:#0284c7;font-size:14.5px;font-weight:800;border-radius:8px"
+                >
+                  CALCULAR
+                </button>
+              </div>
+            </div>
+
+            <div style="font-size:12.5px;color:#475569;margin-top:10px" id="dlg-cepcerto-pacote-info">
+              Peso consolidado do pedido: <strong>{pesoTotalCarrinho} kg</strong>
+            </div>
+          </div>
+
+          <div
+            id="dlg-cepcerto-resultados"
+            style="max-height:320px;overflow-y:auto;margin-bottom:14px;display:flex;flex-direction:column;gap:8px"
+          >
+            <div class="muted" style="text-align:center;padding:18px;border:1px dashed #cbd5e1;border-radius:10px">
+              Confirme o CEP de destino acima e clique em <strong>CALCULAR</strong> para listar os valores dos fornecedores de frete.
+            </div>
+          </div>
+
+          <div class="row" style="justify-content:flex-end;gap:10px;padding-top:10px;border-top:1px solid #e2e8f0">
+            <button type="button" class="btn sec" id="btn-cancelar-dlg-cepcerto">Cancelar</button>
+            <button
+              type="button"
+              class="btn"
+              id="btn-salvar-dlg-cepcerto"
+              disabled
+              style="background:#059669;font-weight:700"
+            >
+              ✓ Salvar Frete Selecionado
+            </button>
+          </div>
+        </dialog>
+      )}
     </>
   )}
 
@@ -863,7 +961,11 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
       const infoPacote = document.getElementById('frete-pacote-info');
       const containerOpcoes = document.getElementById('frete-opcoes-container');
       const inpValCepCerto = document.getElementById('inp-val-cepcerto');
-      const wrapCepCerto = document.getElementById('cepcerto-widget-wrap');
+      const inpModCepCerto = document.getElementById('inp-mod-cepcerto');
+      const inpCepCepCerto = document.getElementById('inp-cep-cepcerto');
+      const inpPrazoCepCerto = document.getElementById('inp-prazo-cepcerto');
+      const resumoBoxCepCerto = document.getElementById('resumo-frete-cepcerto-box');
+      const lblFornecedorFrete = document.getElementById('lbl-fornecedor-frete');
       const lblFrete = document.getElementById('lbl-valor-frete');
       const lblTotal = document.getElementById('lbl-total-pedido');
       if (!form) return;
@@ -875,26 +977,184 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
         return Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       }
 
-      if (inpValCepCerto) {
-        function syncCepCertoVal() {
-          const valFrete = Math.max(0, parseFloat(inpValCepCerto.value || '0') || 0);
-          if (lblFrete) lblFrete.textContent = 'R$ ' + formatarMoeda(valFrete);
-          if (lblTotal) lblTotal.textContent = 'R$ ' + formatarMoeda(subtotal + valFrete);
-        }
-        inpValCepCerto.addEventListener('input', syncCepCertoVal);
+      // Diálogo de Cálculo de Frete Multi-Fornecedor (CEP Certo)
+      const dlgCepCerto = document.getElementById('dlg-frete-cepcerto');
+      const btnAbrirDlg = document.getElementById('btn-abrir-dlg-cepcerto');
+      const btnFecharDlg = document.getElementById('btn-fechar-dlg-cepcerto');
+      const btnCancelarDlg = document.getElementById('btn-cancelar-dlg-cepcerto');
+      const btnCalcularDlg = document.getElementById('btn-dlg-calcular-cepcerto');
+      const btnSalvarDlg = document.getElementById('btn-salvar-dlg-cepcerto');
+      const inpDlgCepDestino = document.getElementById('inp-dlg-cep-destino');
+      const boxDlgResultados = document.getElementById('dlg-cepcerto-resultados');
+      const boxDlgPacoteInfo = document.getElementById('dlg-cepcerto-pacote-info');
 
-        // Se o cliente clicar em uma linha/opção com valor em R$ dentro do widget do CEP Certo, preenche automaticamente
-        if (wrapCepCerto) {
-          wrapCepCerto.addEventListener('click', (e) => {
-            const txt = (e.target && e.target.closest('tr, li, label, div')?.innerText) || '';
-            const m = txt.match(/R\$\s*(\d+(?:[.,]\d{2}))/);
-            if (m) {
-              const num = parseFloat(m[1].replace('.', '').replace(',', '.'));
-              if (!isNaN(num)) {
-                inpValCepCerto.value = num.toFixed(2);
-                syncCepCertoVal();
+      if (dlgCepCerto && btnAbrirDlg) {
+        btnAbrirDlg.addEventListener('click', () => {
+          dlgCepCerto.showModal();
+          if (inpDlgCepDestino) {
+            setTimeout(() => inpDlgCepDestino.focus(), 40);
+          }
+        });
+
+        [btnFecharDlg, btnCancelarDlg].forEach((b) => {
+          if (b) b.addEventListener('click', () => dlgCepCerto.close());
+        });
+
+        async function executarCalculoNoDialogo() {
+          if (!inpDlgCepDestino || !boxDlgResultados || !btnCalcularDlg) return;
+          const cepLimpo = String(inpDlgCepDestino.value || '').replace(/\D/g, '');
+          if (cepLimpo.length !== 8) {
+            boxDlgResultados.innerHTML =
+              '<div class="msg err" style="margin:0">Informe um CEP de destino válido com 8 dígitos (ex.: 01310-100).</div>';
+            return;
+          }
+          inpDlgCepDestino.value = cepLimpo.slice(0, 5) + '-' + cepLimpo.slice(5);
+          btnCalcularDlg.disabled = true;
+          btnCalcularDlg.textContent = 'Calculando...';
+
+          try {
+            const resp = await fetch('/api/calcular-frete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                empresa: empCodigo,
+                cepDestino: cepLimpo,
+                multiFornecedor: true,
+              }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.ok) {
+              boxDlgResultados.innerHTML =
+                '<div class="msg err" style="margin:0">' +
+                (data.erro || 'Não foi possível calcular o frete para o CEP informado.') +
+                '</div>';
+              if (btnSalvarDlg) btnSalvarDlg.disabled = true;
+            } else {
+              if (boxDlgPacoteInfo) {
+                const destTxt = data.localidadeDestino
+                  ? ' · Destino: <strong>' + data.localidadeDestino + '</strong>'
+                  : '';
+                boxDlgPacoteInfo.innerHTML =
+                  'Peso físico: <strong>' +
+                  data.pesoFisicoKg +
+                  ' kg</strong> · Peso cúbico: <strong>' +
+                  data.pesoCubicoKg +
+                  ' kg</strong> · Caixa: <strong>' +
+                  data.dimensoesPacoteCm.comprimento +
+                  '×' +
+                  data.dimensoesPacoteCm.largura +
+                  '×' +
+                  data.dimensoesPacoteCm.altura +
+                  ' cm</strong>' +
+                  destTxt;
               }
+
+              boxDlgResultados.innerHTML = data.opcoes
+                .map((op, i) => {
+                  const precoTxt = op.valor === 0 ? 'Grátis' : 'R$ ' + formatarMoeda(op.valor);
+                  return (
+                    '<label class="frete-card ' +
+                    (i === 0 ? 'ativo' : '') +
+                    '" style="margin:0">' +
+                    '<input type="radio" name="dlg_opcao_frete" value="' +
+                    op.codigo +
+                    '" data-nome="' +
+                    op.nome.replace(/"/g, '&quot;') +
+                    '" data-valor="' +
+                    op.valor +
+                    '" data-prazo="' +
+                    op.prazoDias +
+                    '" ' +
+                    (i === 0 ? 'checked' : '') +
+                    ' />' +
+                    '<div style="flex:1">' +
+                    '<div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px">' +
+                    '<span>🚚 ' +
+                    op.nome +
+                    '</span>' +
+                    '<span style="color:#0284c7">' +
+                    precoTxt +
+                    '</span>' +
+                    '</div>' +
+                    '<div class="muted" style="font-size:12px;margin-top:2px">' +
+                    op.descricao +
+                    '</div>' +
+                    '</div>' +
+                    '</label>'
+                  );
+                })
+                .join('');
+
+              boxDlgResultados.querySelectorAll('input[name="dlg_opcao_frete"]').forEach((radio) => {
+                radio.addEventListener('change', () => {
+                  boxDlgResultados.querySelectorAll('.frete-card').forEach((card) => {
+                    const r = card.querySelector('input[type="radio"]');
+                    card.classList.toggle('ativo', !!(r && r.checked));
+                  });
+                });
+              });
+
+              if (btnSalvarDlg) btnSalvarDlg.disabled = false;
             }
+          } catch {
+            boxDlgResultados.innerHTML =
+              '<div class="msg err" style="margin:0">Erro de conexão ao consultar fornecedores de frete.</div>';
+          } finally {
+            btnCalcularDlg.disabled = false;
+            btnCalcularDlg.textContent = 'CALCULAR';
+          }
+        }
+
+        if (btnCalcularDlg) {
+          btnCalcularDlg.addEventListener('click', executarCalculoNoDialogo);
+        }
+        if (inpDlgCepDestino) {
+          inpDlgCepDestino.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              executarCalculoNoDialogo();
+            }
+          });
+        }
+
+        if (btnSalvarDlg) {
+          btnSalvarDlg.addEventListener('click', () => {
+            const sel =
+              boxDlgResultados &&
+              boxDlgResultados.querySelector('input[name="dlg_opcao_frete"]:checked');
+            if (!sel) return;
+
+            const fornecedorNome = sel.getAttribute('data-nome') || 'Frete CEP Certo';
+            const valFrete = Math.max(0, parseFloat(sel.getAttribute('data-valor') || '0') || 0);
+            const prazoDias = Math.max(1, parseInt(sel.getAttribute('data-prazo') || '5', 10) || 5);
+            const cepDestFmt = inpDlgCepDestino ? inpDlgCepDestino.value.trim() : '';
+
+            if (inpModCepCerto) inpModCepCerto.value = fornecedorNome;
+            if (inpValCepCerto) inpValCepCerto.value = valFrete.toFixed(2);
+            if (inpPrazoCepCerto) inpPrazoCepCerto.value = String(prazoDias);
+            if (inpCepCepCerto && cepDestFmt) inpCepCepCerto.value = cepDestFmt;
+
+            const ehRetirada = sel.value === 'RETIRADA' || /retirada/i.test(fornecedorNome);
+            if (lblFornecedorFrete) lblFornecedorFrete.textContent = ehRetirada ? 'Retirada na Loja' : fornecedorNome;
+            if (lblFrete) {
+              lblFrete.textContent = 'R$ ' + formatarMoeda(valFrete);
+            }
+            if (lblTotal) lblTotal.textContent = 'R$ ' + formatarMoeda(subtotal + valFrete);
+
+            if (resumoBoxCepCerto) {
+              resumoBoxCepCerto.innerHTML =
+                'Fornecedor selecionado: <strong style="color:#0369a1">' +
+                fornecedorNome +
+                '</strong> · Prazo: <strong>até ' +
+                prazoDias +
+                ' dia(s) útil(eis)</strong> · Valor: <strong style="color:#059669">' +
+                (valFrete === 0 ? 'Grátis' : 'R$ ' + formatarMoeda(valFrete)) +
+                '</strong>' +
+                (cepDestFmt ? ' · CEP Destino: <strong>' + cepDestFmt + '</strong>' : '');
+            }
+
+            btnAbrirDlg.textContent = '🔄 Alterar Frete';
+            dlgCepCerto.close();
           });
         }
       }
@@ -904,7 +1164,16 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
       function atualizarResumoFinanceiro() {
         const selecionado = containerOpcoes.querySelector('input[name="frete_codigo"]:checked');
         const valFrete = selecionado ? parseFloat(selecionado.getAttribute('data-valor') || '0') || 0 : 0;
-        if (lblFrete) lblFrete.textContent = 'R$ ' + formatarMoeda(valFrete);
+        const codFrete = selecionado ? selecionado.value : 'RETIRADA';
+        const nomeFrete = selecionado ? selecionado.getAttribute('data-nome') || 'Correios' : 'Retirada na Loja';
+        const ehRetirada = codFrete === 'RETIRADA' || /retirada/i.test(nomeFrete);
+
+        if (lblFornecedorFrete) {
+          lblFornecedorFrete.textContent = ehRetirada ? 'Retirada na Loja' : nomeFrete;
+        }
+        if (lblFrete) {
+          lblFrete.textContent = 'R$ ' + formatarMoeda(valFrete);
+        }
         if (lblTotal) lblTotal.textContent = 'R$ ' + formatarMoeda(subtotal + valFrete);
 
         containerOpcoes.querySelectorAll('.frete-card').forEach((card) => {
@@ -960,6 +1229,8 @@ const pesoTotalCarrinho = Math.round(itens.reduce((acc, it) => acc + it.quantida
                   '">' +
                   '<input type="radio" name="frete_codigo" value="' +
                   op.codigo +
+                  '" data-nome="' +
+                  op.nome.replace(/"/g, '&quot;') +
                   '" data-valor="' +
                   op.valor +
                   '" ' +

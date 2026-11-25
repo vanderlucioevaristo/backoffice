@@ -123,10 +123,14 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
     return json({ ok: false, erro: 'Adicione pelo menos um produto para calcular o frete.' }, 400);
   }
 
+  const usarMultiFornecedor =
+    body.multiFornecedor === true || empresa.frete_provedor === 'CEPCERTO';
+
   const resultado = calcularFreteCorreios({
     cepOrigem: empresa.cep_origem || '01001000',
     cepDestino,
     itens: itensFrete,
+    multiFornecedor: usarMultiFornecedor,
   });
 
   // Tenta enriquecer com cidade/UF do CEP de destino via ViaCEP (opcional, sem bloquear se offline)

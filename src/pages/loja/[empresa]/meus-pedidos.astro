@@ -189,12 +189,19 @@ const baseUrl = `/loja/${empCodigo}`;
             ped.pagamento_status !== 'PAGO' &&
             ((empresa.nubank_link_ativo === 1 && ped.nubank_link_pagamento) ||
               (empresa.nubank_pix_ativo === 1 && ped.nubank_pix_copia_cola)) && (
-            <div style="margin-bottom:12px;padding:12px 14px;background:#faf5ff;border:1.5px solid #c084fc;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <div style="margin-bottom:12px;padding:12px 14px;background:#f8fafc;border:1.5px solid #93c5fd;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="background:#820ad1;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:99px">
-                  Nubank
-                </span>
-                <strong style="color:#581c87;font-size:13.5px">
+                {empresa.nubank_pix_ativo === 1 && ped.nubank_pix_copia_cola && (
+                  <span style="background:#1d4ed8;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:99px">
+                    PIX · {empresa.pix_instituicao || 'Nubank'}
+                  </span>
+                )}
+                {empresa.nubank_link_ativo === 1 && ped.nubank_link_pagamento && (
+                  <span style="background:#820ad1;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:99px">
+                    Nubank
+                  </span>
+                )}
+                <strong style="color:#1e3a8a;font-size:13.5px">
                   Opções de pagamento para este pedido ({formatMoney(ped.valor_total)}):
                 </strong>
               </div>
@@ -207,18 +214,18 @@ const baseUrl = `/loja/${empCodigo}`;
                     class="btn sm"
                     style="background:#820ad1;color:#fff;font-weight:700"
                   >
-                    💜 Pagar pelo Link do Nubank ↗
+                    💜 Pagar pelo Link de Cobrança Nubank ↗
                   </a>
                 )}
                 {empresa.nubank_pix_ativo === 1 && ped.nubank_pix_copia_cola && (
                   <button
                     type="button"
                     class="btn sm sec"
-                    style="border-color:#820ad1;color:#581c87;font-weight:700"
+                    style="border-color:#1d4ed8;color:#1e3a8a;font-weight:700"
                     data-pix={ped.nubank_pix_copia_cola}
-                    onclick="navigator.clipboard.writeText(this.getAttribute('data-pix'));this.textContent='✓ Pix Nubank Copiado!';"
+                    onclick="navigator.clipboard.writeText(this.getAttribute('data-pix'));this.textContent='✓ Código PIX Copiado!';"
                   >
-                    📋 Copiar Pix Nubank (Copia e Cola)
+                    📋 Copiar PIX ({empresa.pix_instituicao || 'Nubank'} — Copia e Cola)
                   </button>
                 )}
               </div>

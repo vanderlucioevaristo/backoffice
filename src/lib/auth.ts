@@ -415,6 +415,7 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN cor_texto_categorias_topo TEXT",
       "ALTER TABLE produtos ADD COLUMN visualizacoes INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE produtos ADD COLUMN insercoes_carrinho INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE empresas ADD COLUMN pix_instituicao TEXT NOT NULL DEFAULT 'Nubank'",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -574,6 +575,7 @@ export type LojaEmpresa = {
   tempo_sessao_minutos: number;
   nubank_pix_ativo: number;
   nubank_link_ativo: number;
+  pix_instituicao: string;
   nubank_chave_pix: string | null;
   nubank_cidade_pix: string | null;
   nubank_link_padrao: string | null;
@@ -607,6 +609,7 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
               COALESCE(tempo_sessao_minutos, 10) AS tempo_sessao_minutos,
               COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
               COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
+              COALESCE(NULLIF(pix_instituicao, ''), 'Nubank') AS pix_instituicao,
               nubank_chave_pix,
               COALESCE(NULLIF(nubank_cidade_pix, ''), 'SAO PAULO') AS nubank_cidade_pix,
               nubank_link_padrao,

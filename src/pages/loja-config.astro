@@ -38,6 +38,7 @@ let emp = await db()
             COALESCE(tempo_sessao_minutos, 10) AS tempo_sessao_minutos,
             COALESCE(nubank_pix_ativo, 1) AS nubank_pix_ativo,
             COALESCE(nubank_link_ativo, 1) AS nubank_link_ativo,
+            COALESCE(NULLIF(pix_instituicao, ''), 'Nubank') AS pix_instituicao,
             nubank_chave_pix,
             COALESCE(NULLIF(nubank_cidade_pix, ''), 'SAO PAULO') AS nubank_cidade_pix,
             nubank_link_padrao,
@@ -100,6 +101,7 @@ if (Astro.request.method === 'POST') {
   const mostrarFreteVitrine = freteProvedor === 'CEPCERTO' ? 0 : f.get('mostrar_frete_vitrine') ? 1 : 0;
   const nubankPixAtivo = f.get('nubank_pix_ativo') ? 1 : 0;
   const nubankLinkAtivo = f.get('nubank_link_ativo') ? 1 : 0;
+  const pixInstituicao = str(f, 'pix_instituicao', 60) || 'Nubank';
   const nubankChavePix = str(f, 'nubank_chave_pix', 140).replace(/\s+/g, '');
   const nubankCidadePix = str(f, 'nubank_cidade_pix', 30) || 'SAO PAULO';
   const nubankLinkPadrao = str(f, 'nubank_link_padrao', 400);
@@ -140,7 +142,7 @@ if (Astro.request.method === 'POST') {
                 agenda_ativa = ?, agenda_menu_texto = ?, agenda_inicio = ?, agenda_fim = ?, agenda_intervalo_min = ?,
                 agenda_dias_semana = ?, agenda_datas_fechadas = ?, cep_origem = ?, mostrar_frete_vitrine = ?,
                 frete_provedor = ?, cepcerto_public_key = ?, tempo_sessao_minutos = ?,
-                nubank_pix_ativo = ?, nubank_link_ativo = ?,
+                nubank_pix_ativo = ?, nubank_link_ativo = ?, pix_instituicao = ?,
                 nubank_chave_pix = ?, nubank_cidade_pix = ?, nubank_link_padrao = ?,
                 nupay_merchant_key = ?, nupay_merchant_token = ?,
                 infinitepay_ativo = ?, infinitepay_handle = ?, infinitepay_api_key = ?,
@@ -182,6 +184,7 @@ if (Astro.request.method === 'POST') {
         tempoSessaoMinutos,
         nubankPixAtivo,
         nubankLinkAtivo,
+        pixInstituicao,
         nubankChavePix || null,
         nubankCidadePix,
         nubankLinkPadrao || null,
@@ -233,6 +236,7 @@ if (Astro.request.method === 'POST') {
       tempo_sessao_minutos: tempoSessaoMinutos,
       nubank_pix_ativo: nubankPixAtivo,
       nubank_link_ativo: nubankLinkAtivo,
+      pix_instituicao: pixInstituicao,
       nubank_chave_pix: nubankChavePix,
       nubank_cidade_pix: nubankCidadePix,
       nubank_link_padrao: nubankLinkPadrao,
@@ -575,57 +579,70 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
 
     <div class="card cfg-card" style="border-left:4px solid #820ad1">
       <div class="cfg-head" role="button" tabindex="0" aria-expanded="false">
-        <h2 style="color:#820ad1">💜 Pagamento Nubank (Pix Automático, Link de Cobrança e NuPay)</h2>
+        <h2 style="color:#820ad1">💠 Pagamento por PIX e Link de Cobrança Nubank / NuPay</h2>
         <span class="cfg-toggle-hint"><span class="cfg-toggle-lbl">Clique para abrir</span> <span class="cfg-chevron">▼</span></span>
       </div>
       <div class="cfg-body">
       <p class="muted" style="margin-top:8px;font-size:13px">
-        Configure sua chave Pix do Nubank para gerar automaticamente o <strong>QR Code Pix + Copia e Cola</strong> com o valor exato do pedido, o link de cobrança do Nubank PJ ou suas credenciais da API comercial <strong>NuPay for Business</strong>.
+        Configure o <strong>Pagamento por PIX</strong> de qualquer banco ou instituição financeira (gerando automaticamente o <strong>QR Code Pix + Copia e Cola</strong> com o valor exato do pedido) e escolha se deseja exibir ou não a opção de <strong>Link de Cobrança Nubank / NuPay</strong>.
       </p>
 
-      <!-- Bloco 1: Ativação das formas de pagamento Nubank -->
+      <!-- Bloco 1: Ativação das formas de pagamento na Loja -->
       <div class="grid" style="margin-bottom:14px">
         <div class="c6">
-          <label class="check" style="font-size:14.5px;font-weight:700;color:#581c87;padding:12px 14px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px">
+          <label class="check" style="font-size:14.5px;font-weight:700;color:#1e3a8a;padding:12px 14px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px">
             <input type="checkbox" name="nubank_pix_ativo" value="1" checked={(emp.nubank_pix_ativo ?? 1) === 1} />
-            Habilitar opção "💠 Pix Nubank (QR Code + Copia e Cola)" na Loja
+            Exibir opção "💠 Pagamento por PIX (QR Code + Copia e Cola)" na Loja
           </label>
         </div>
         <div class="c6">
           <label class="check" style="font-size:14.5px;font-weight:700;color:#581c87;padding:12px 14px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px">
-            <input type="checkbox" name="nubank_link_ativo" value="1" checked={(emp.nubank_link_ativo ?? 1) === 1} />
-            Habilitar opção "💜 Link de Pagamento Nubank / NuPay" na Loja
+            <input type="checkbox" name="nubank_link_ativo" id="chk-nubank-link-ativo" value="1" checked={(emp.nubank_link_ativo ?? 1) === 1} />
+            Exibir opção "💜 Link de Cobrança Nubank / NuPay" na Loja
           </label>
         </div>
         <div class="c12">
           <small class="muted">
-            Você pode marcar ou desmarcar cada opção quando quiser. Se ambas estiverem desmarcadas, o cliente finalizará o pedido normalmente sem exibir cobrança online do Nubank no carrinho.
+            Marque ou desmarque cada parâmetro acima para controlar individualmente se o <strong>Pagamento por PIX</strong> e/ou o <strong>Link de Cobrança Nubank</strong> serão exibidos aos clientes na tela de pagamento do pedido.
           </small>
         </div>
       </div>
 
-      <!-- Bloco 2: Configuração de Pix (QR Code e Copia e Cola) -->
-      <div style="padding:16px 18px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:14px">
-        <div style="font-size:14px;font-weight:800;color:#6b21a8;margin-bottom:12px;display:flex;align-items:center;gap:6px">
-          <span>💠 Dados para Geração Automática do Pix (QR Code + Copia e Cola)</span>
+      <!-- Bloco 2: Configuração de Pagamento por PIX (Qualquer Instituição) -->
+      <div style="padding:16px 18px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;margin-bottom:14px">
+        <div style="font-size:14px;font-weight:800;color:#1e3a8a;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+          <span>💠 Dados para Pagamento por PIX (QR Code + Copia e Cola)</span>
         </div>
         <div class="grid">
           <div class="c12">
-            <label style="font-weight:700;color:#3b0764;font-size:14px">
-              Chave Pix da conta Nubank (CNPJ, CPF, E-mail, Celular ou Chave Aleatória EVP completa)
+            <label style="font-weight:700;color:#0f172a;font-size:14px">
+              Chave PIX (CNPJ, CPF, E-mail, Celular ou Chave Aleatória EVP completa)
             </label>
             <input
               name="nubank_chave_pix"
               value={emp.nubank_chave_pix ?? emp.cnpj ?? ''}
               placeholder="Ex: 123e4567-e89b-12d3-a456-426614174000, 65.491.970/0001-82 ou seu@email.com.br"
-              style="width:100%;height:46px;font-size:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-weight:700;letter-spacing:0.3px;padding:10px 14px;border:2px solid #c084fc;border-radius:8px;background:#ffffff;color:#1e1b4b"
+              style="width:100%;height:46px;font-size:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-weight:700;letter-spacing:0.3px;padding:10px 14px;border:2px solid #93c5fd;border-radius:8px;background:#ffffff;color:#0f172a"
             />
             <small class="muted" style="display:block;margin-top:5px">
               Campo de 1 linha em largura total para visualizar a chave aleatória (UUID de 36 caracteres), CNPJ, CPF, celular ou e-mail por completo.
             </small>
           </div>
           <div class="c6">
-            <label style="font-weight:700;color:#3b0764">Cidade do titular (padrão BR Code)</label>
+            <label style="font-weight:700;color:#0f172a">Instituição / Banco do PIX (exibido na tela de pagamento)</label>
+            <input
+              name="pix_instituicao"
+              value={emp.pix_instituicao || 'Nubank'}
+              maxlength="60"
+              placeholder="Ex: Nubank, Itaú, Banco do Brasil, Inter, Bradesco, Santander, Caixa..."
+              style="height:44px;font-size:15.5px;font-weight:600;padding:10px 12px"
+            />
+            <small class="muted" style="display:block;margin-top:4px">
+              Este nome aparecerá para o cliente na escolha do pagamento e junto ao QR Code do PIX.
+            </small>
+          </div>
+          <div class="c6">
+            <label style="font-weight:700;color:#0f172a">Cidade do titular da conta (padrão BR Code)</label>
             <input
               name="nubank_cidade_pix"
               value={emp.nubank_cidade_pix || 'SAO PAULO'}
@@ -641,13 +658,22 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
       </div>
 
       <!-- Bloco 3: Link de Cobrança Nubank PJ e Credenciais NuPay -->
-      <div style="padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
-        <div style="font-size:13.5px;font-weight:800;color:#334155;margin-bottom:10px;display:flex;align-items:center;gap:6px">
-          <span>🔗 Link de Cobrança Nubank PJ e Credenciais NuPay for Business (Opcional)</span>
+      <div
+        id="box-cfg-nubank-link"
+        style={`padding:14px 16px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;transition:opacity 0.15s;${(emp.nubank_link_ativo ?? 1) === 1 ? '' : 'opacity:0.65'}`}
+      >
+        <div style="font-size:13.5px;font-weight:800;color:#6b21a8;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <span>💜 Link de Cobrança Nubank PJ e Credenciais NuPay for Business</span>
+          <span
+            id="badge-nubank-link-status"
+            style={`font-size:11.5px;padding:2px 9px;border-radius:99px;${(emp.nubank_link_ativo ?? 1) === 1 ? 'background:#dcfce7;color:#166534' : 'background:#e2e8f0;color:#475569'}`}
+          >
+            {(emp.nubank_link_ativo ?? 1) === 1 ? '✓ Exibição ativada na loja' : 'Oculto na loja'}
+          </span>
         </div>
         <div class="grid">
           <div class="c12">
-            <label style="font-weight:600;color:#1e293b">Link de Cobrança Nubank PJ padrão (opcional)</label>
+            <label style="font-weight:600;color:#3b0764">Link de Cobrança Nubank PJ padrão (opcional)</label>
             <input
               name="nubank_link_padrao"
               value={emp.nubank_link_padrao ?? ''}
@@ -1139,6 +1165,18 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
 
   // Quando o provedor de frete muda para CEP Certo, desabilita automaticamente o frete na apresentação do produto
   const selFreteProv = document.getElementById('sel-frete-provedor');
+  const chkNubankLink = document.getElementById('chk-nubank-link-ativo');
+  const boxCfgNubankLink = document.getElementById('box-cfg-nubank-link');
+  const badgeNubankLink = document.getElementById('badge-nubank-link-status');
+  if (chkNubankLink && boxCfgNubankLink && badgeNubankLink) {
+    chkNubankLink.addEventListener('change', () => {
+      const ativo = chkNubankLink.checked;
+      boxCfgNubankLink.style.opacity = ativo ? '1' : '0.65';
+      badgeNubankLink.textContent = ativo ? '✓ Exibição ativada na loja' : 'Oculto na loja';
+      badgeNubankLink.style.background = ativo ? '#dcfce7' : '#e2e8f0';
+      badgeNubankLink.style.color = ativo ? '#166534' : '#475569';
+    });
+  }
   const chkFreteVit = document.getElementById('chk-frete-vitrine');
   const lblFreteVit = document.getElementById('lbl-frete-vitrine');
   const txtFreteVit = document.getElementById('txt-frete-vitrine');

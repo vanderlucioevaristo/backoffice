@@ -1584,14 +1584,17 @@ export async function registrarVisualizacaoProduto(
   }
 }
 
+/**
+ * Registra a intenção de compra de um produto no carrinho de forma individualizada por produto,
+ * contabilizando quantas pessoas distintas inseriram determinado produto no carrinho.
+ */
 export async function registrarInsercaoCarrinhoProduto(
   database: any,
   empresaId: number,
   produtoId: number,
-  quantidade = 1,
+  parceiroId?: number | null,
 ): Promise<void> {
   if (!empresaId || !produtoId) return;
-  const inc = Math.max(1, Math.round(Number(quantidade) || 1));
   try {
     const prod = await database
       .prepare('SELECT id, categoria FROM produtos WHERE id = ? AND empresa_id = ?')
@@ -1599,12 +1602,38 @@ export async function registrarInsercaoCarrinhoProduto(
       .first();
     if (!prod) return;
 
-    await database
-      .prepare(
-        'UPDATE produtos SET insercoes_carrinho = COALESCE(insercoes_carrinho, 0) + ? WHERE id = ? AND empresa_id = ?',
-      )
-      .bind(inc, produtoId, empresaId)
-      .run();
+    const pidCliente = Number(parceiroId) || 0;
+    if (pidCliente > 0) {
+      await database
+        .prepare(
+          `INSERT INTO loja_metricas_carrinho_clientes (empresa_id, produto_id, parceiro_id, vezes, atualizado_em)
+           VALUES (?, ?, ?, 1, datetime('now'))
+           ON CONFLICT (empresa_id, produto_id, parceiro_id)
+           DO UPDATE SET vezes = loja_metricas_carrinho_clientes.vezes + 1,
+                         atualizado_em = datetime('now')`,
+        )
+        .bind(empresaId, produtoId, pidCliente)
+        .run();
+
+      const qtdPessoas = await database
+        .prepare(
+          'SELECT COUNT(DISTINCT parceiro_id) AS n FROM loja_metricas_carrinho_clientes WHERE empresa_id = ? AND produto_id = ?',
+        )
+        .bind(empresaId, produtoId)
+        .first();
+
+      await database
+        .prepare('UPDATE produtos SET insercoes_carrinho = ? WHERE id = ? AND empresa_id = ?')
+        .bind(Number(qtdPessoas?.n || 1), produtoId, empresaId)
+        .run();
+    } else {
+      await database
+        .prepare(
+          'UPDATE produtos SET insercoes_carrinho = COALESCE(insercoes_carrinho, 0) + 1 WHERE id = ? AND empresa_id = ?',
+        )
+        .bind(produtoId, empresaId)
+        .run();
+    }
 
     await registrarConsultaCategoria(database, empresaId, prod.categoria);
   } catch {
@@ -1674,13 +1703,21 @@ export function formatarDuracaoHumana(segundosRaw?: number | null): string {
 }
 
 export async function obterMetricasDashboardLoja(database: any, empresaId: number) {
-  // 1. Produtos com contadores de visualizações, inserções no carrinho e vendas efetivadas
-  const { results: produtosMetricas } = await database
+  // 1. Produtos com contadores de visualizações, pessoas que inseriram no carrinho (intenção de compra por produto) e vendas efetivadas
+  const { results: produtosMetricasRaw } = await database
     .prepare(
       `SELECT p.id, p.codigo, p.nome, p.foto, p.unidade, p.preco_venda, p.estoque_atual, p.ativo,
               COALESCE(NULLIF(TRIM(p.categoria), ''), 'Geral') AS categoria,
               COALESCE(p.visualizacoes, 0) AS visualizacoes,
-              COALESCE(p.insercoes_carrinho, 0) AS insercoes_carrinho,
+              MAX(
+                COALESCE(p.insercoes_carrinho, 0),
+                (SELECT COUNT(DISTINCT mc.parceiro_id)
+                   FROM loja_metricas_carrinho_clientes mc
+                  WHERE mc.empresa_id = p.empresa_id AND mc.produto_id = p.id),
+                (SELECT COUNT(DISTINCT lc.parceiro_id)
+                   FROM loja_carrinho lc
+                  WHERE lc.empresa_id = p.empresa_id AND lc.produto_id = p.id)
+              ) AS insercoes_carrinho,
               COALESCE(SUM(CASE WHEN lp.id IS NOT NULL AND lp.status <> 'cancelado' THEN i.quantidade ELSE 0 END), 0) AS vendas_quantidade,
               COUNT(DISTINCT CASE WHEN lp.id IS NOT NULL AND lp.status <> 'cancelado' THEN lp.id ELSE NULL END) AS vendas_pedidos,
               COALESCE(SUM(CASE WHEN lp.id IS NOT NULL AND lp.status <> 'cancelado' THEN i.subtotal ELSE 0 END), 0) AS vendas_valor
@@ -1689,12 +1726,21 @@ export async function obterMetricasDashboardLoja(database: any, empresaId: numbe
          LEFT JOIN loja_pedidos lp ON lp.id = i.pedido_id AND lp.empresa_id = p.empresa_id
         WHERE p.empresa_id = ?
         GROUP BY p.id
-        ORDER BY vendas_quantidade DESC, p.insercoes_carrinho DESC, p.visualizacoes DESC, p.nome COLLATE NOCASE ASC`,
+        ORDER BY vendas_quantidade DESC, insercoes_carrinho DESC, p.visualizacoes DESC, p.nome COLLATE NOCASE ASC`,
     )
     .bind(empresaId)
     .all();
 
-  // 2. Categorias mais consultadas (combinando consultas diretas à categoria + visualizações/carrinho/vendas dos produtos daquela categoria)
+  // Filtra somente produtos que possuam pelo menos um dos contadores maior que zero
+  const produtosMetricas = (produtosMetricasRaw || []).filter(
+    (p: any) =>
+      Number(p.visualizacoes || 0) > 0 ||
+      Number(p.insercoes_carrinho || 0) > 0 ||
+      Number(p.vendas_quantidade || 0) > 0 ||
+      Number(p.vendas_pedidos || 0) > 0,
+  );
+
+  // 2. Categorias mais consultadas (somente categorias com pelo menos um contador > 0)
   const { results: categoriasConsultasRows } = await database
     .prepare(
       `SELECT categoria, consultas, atualizado_em
@@ -1734,7 +1780,7 @@ export async function obterMetricasDashboardLoja(database: any, empresaId: numbe
     }
   >();
 
-  for (const p of produtosMetricas || []) {
+  for (const p of produtosMetricasRaw || []) {
     const nomeCat = String(p.categoria || 'Geral').trim() || 'Geral';
     const key = nomeCat.toLowerCase();
     const existente = mapaCategorias.get(key) || {
@@ -1776,9 +1822,15 @@ export async function obterMetricasDashboardLoja(database: any, empresaId: numbe
   const categoriasMaisConsultadas = Array.from(mapaCategorias.values())
     .map((c) => ({
       ...c,
-      // Total de consultas da categoria considera cliques na categoria ou visualizações diretas dos itens dela
       totalConsultas: Math.max(c.consultas, c.visualizacoesProdutos),
     }))
+    .filter(
+      (c) =>
+        c.totalConsultas > 0 ||
+        c.visualizacoesProdutos > 0 ||
+        c.insercoesCarrinho > 0 ||
+        c.vendasEfetivadas > 0,
+    )
     .sort(
       (a, b) =>
         b.totalConsultas - a.totalConsultas ||

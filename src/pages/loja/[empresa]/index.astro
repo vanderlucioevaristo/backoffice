@@ -63,7 +63,7 @@ if (Astro.request.method === 'POST') {
       .bind(empresa.id, cliente.id, prod.id, novaQtd)
       .run();
 
-    await registrarInsercaoCarrinhoProduto(db(), empresa.id, prod.id, qtd);
+    await registrarInsercaoCarrinhoProduto(db(), empresa.id, prod.id, cliente.id);
 
     msgOk = `"${prod.nome}" foi adicionado ao seu carrinho!`;
   }

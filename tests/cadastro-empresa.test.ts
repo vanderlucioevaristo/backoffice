@@ -677,24 +677,40 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
       .bind(empId)
       .first<{ id: number }>();
 
-    // Visualizações e inserções no carrinho
+    // Produto 3 e categoria 'Ferramentas' com todos os contadores zerados NÃO devem aparecer no Dashboard
+    await ctx.d1
+      .prepare(
+        "INSERT INTO produtos (empresa_id, codigo, nome, categoria, preco_venda, estoque_atual, ativo) VALUES (?, 'P3', 'Martelo Sem Movimento', 'Ferramentas', 50, 10, 1)",
+      )
+      .bind(empId)
+      .run();
+
+    const cli1 = await ctx.d1
+      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente Dash 1', 1) RETURNING id")
+      .bind(empId)
+      .first<{ id: number }>();
+
+    const cli2 = await ctx.d1
+      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente Dash 2', 1) RETURNING id")
+      .bind(empId)
+      .first<{ id: number }>();
+
+    // Visualizações e inserções no carrinho (por pessoa distinta por produto)
     await registrarVisualizacaoProduto(ctx.d1, empId, prod1!.id);
     await registrarVisualizacaoProduto(ctx.d1, empId, prod1!.id);
     await registrarVisualizacaoProduto(ctx.d1, empId, prod1!.id);
     await registrarVisualizacaoProduto(ctx.d1, empId, prod2!.id);
 
-    await registrarInsercaoCarrinhoProduto(ctx.d1, empId, prod1!.id, 2);
+    // Duas pessoas distintas (cli1 e cli2) tentaram comprar prod1; mesmo cli1 clicando duas vezes, são 2 pessoas distintas
+    await registrarInsercaoCarrinhoProduto(ctx.d1, empId, prod1!.id, cli1!.id);
+    await registrarInsercaoCarrinhoProduto(ctx.d1, empId, prod1!.id, cli1!.id);
+    await registrarInsercaoCarrinhoProduto(ctx.d1, empId, prod1!.id, cli2!.id);
     await registrarConsultaCategoria(ctx.d1, empId, 'Celulares e Smartphones');
 
     // Simula uma venda efetivada para prod1
-    const cli = await ctx.d1
-      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente Dash', 1) RETURNING id")
-      .bind(empId)
-      .first<{ id: number }>();
-
     const ped = await ctx.d1
       .prepare("INSERT INTO loja_pedidos (empresa_id, parceiro_id, valor_total, status) VALUES (?, ?, 4000, 'entregue') RETURNING id")
-      .bind(empId, cli!.id)
+      .bind(empId, cli1!.id)
       .first<{ id: number }>();
 
     await ctx.d1
@@ -720,11 +736,14 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
 
     const dash = await obterMetricasDashboardLoja(ctx.d1, empId);
     assert.equal(dash.resumo.totalVisualizacoes, 4);
-    assert.equal(dash.resumo.totalInsercoesCarrinho, 2);
+    assert.equal(dash.resumo.totalInsercoesCarrinho, 2); // 2 pessoas distintas no prod1
     assert.equal(dash.resumo.totalUnidadesVendidas, 2);
     assert.equal(dash.resumo.totalValorVendido, 4000);
     assert.equal(dash.resumo.mediaPermanenciaSegundos, 180); // média entre 120s e 240s
     assert.equal(dash.resumo.mediaIntervaloRetornoSegundos, 3600);
+    // Somente os 2 produtos e as 2 categorias com contadores > 0 devem aparecer (P3 e 'Ferramentas' ficam ocultos)
+    assert.equal(dash.produtos.length, 2);
+    assert.equal(dash.categoriasMaisConsultadas.length, 2);
     assert.equal(dash.categoriasMaisConsultadas[0].categoria, 'Celulares e Smartphones');
   });
 });

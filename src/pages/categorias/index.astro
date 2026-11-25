@@ -1,0 +1,346 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import {
+  ICONES_CATEGORIAS_COMUNS,
+  iconeCategoriaLoja,
+  salvarCategoriaLoja,
+  sincronizarCategoriasProdutos,
+} from '../../lib/empresa-service';
+import { str } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+
+// Garante que todas as categorias já usadas nos produtos apareçam cadastradas na lista
+await sincronizarCategoriasProdutos(db(), u.empresaId);
+
+let erro = '';
+let okMsg = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? 'salvar');
+
+  if (acao === 'excluir') {
+    const idDel = Number(f.get('id')) || 0;
+    if (idDel > 0) {
+      await db()
+        .prepare('DELETE FROM categorias WHERE id = ? AND empresa_id = ?')
+        .bind(idDel, u.empresaId)
+        .run();
+      okMsg = 'Categoria removida com sucesso.';
+    }
+  } else {
+    const idEdit = Number(f.get('id')) || undefined;
+    const nome = str(f, 'nome', 80);
+    const icone = str(f, 'icone', 16) || iconeCategoriaLoja(nome);
+    const ordem = Number(f.get('ordem')) || 0;
+    const ativa = f.get('ativa') ? 1 : 0;
+
+    const res = await salvarCategoriaLoja(db(), {
+      id: idEdit,
+      empresaId: u.empresaId,
+      nome,
+      icone,
+      ordem,
+      ativa,
+    });
+
+    if (!res.ok) {
+      erro = res.erro || 'Não foi possível salvar a categoria.';
+    } else {
+      okMsg = idEdit ? 'Categoria atualizada com sucesso!' : 'Nova categoria cadastrada com sucesso!';
+    }
+  }
+}
+
+const editId = Number(Astro.url.searchParams.get('editar')) || 0;
+
+const { results: categorias } = await db()
+  .prepare(
+    `SELECT c.id, c.nome, c.icone, c.ordem, c.ativa, c.criado_em,
+            (SELECT COUNT(*) FROM produtos p
+              WHERE p.empresa_id = c.empresa_id
+                AND LOWER(TRIM(COALESCE(p.categoria, ''))) = LOWER(TRIM(c.nome))) AS qtd_produtos
+       FROM categorias c
+      WHERE c.empresa_id = ?
+      ORDER BY c.ordem ASC, c.nome COLLATE NOCASE ASC`,
+  )
+  .bind(u.empresaId)
+  .all<{
+    id: number;
+    nome: string;
+    icone: string;
+    ordem: number;
+    ativa: number;
+    criado_em: string;
+    qtd_produtos: number;
+  }>();
+
+const catEdicao = editId > 0 ? categorias.find((c) => c.id === editId) ?? null : null;
+const iconeInicial = catEdicao?.icone || '📦';
+---
+<Layout title="Categorias de Produtos" active="categorias">
+  <style>
+    .icon-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 8px;
+      max-height: 240px;
+      overflow-y: auto;
+      padding: 10px;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      margin-top: 6px;
+    }
+    .icon-option-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      border: 1.5px solid #e2e8f0;
+      background: #ffffff;
+      color: #1e293b;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.14s ease;
+    }
+    .icon-option-btn:hover {
+      border-color: #2563eb;
+      background: #eff6ff;
+      transform: translateY(-1px);
+    }
+    .icon-option-btn.selected {
+      border-color: #2563eb;
+      background: #dbeafe;
+      color: #1e3a8a;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+    }
+    .icon-option-btn .ico {
+      font-size: 20px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .icon-preview-badge {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 8px 16px;
+      border: 1.5px dashed #94a3b8;
+      border-radius: 10px;
+      background: #f8fafc;
+      min-width: 110px;
+      text-align: center;
+    }
+  </style>
+
+  <div class="row">
+    <div>
+      <h1 style="margin-bottom:2px">🏷️ Categorias de Produtos e Ícones da Loja</h1>
+      <span class="muted" style="font-size:13px">
+        Cadastre as categorias da sua loja e escolha o ícone que aparecerá acima do nome no cabeçalho e no catálogo.
+      </span>
+    </div>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/produtos">📦 Ir para Produtos</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {okMsg && <div class="msg ok">{okMsg}</div>}
+
+  <div class="card" style="border-left:4px solid #2563eb">
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin:0">{catEdicao ? `✏️ Editar Categoria: ${catEdicao.nome}` : '➕ Nova Categoria'}</h2>
+      <span class="spacer"></span>
+      {catEdicao && (
+        <a class="btn sec sm" href="/categorias">Cancelar edição</a>
+      )}
+    </div>
+
+    <form method="post" id="form-categoria">
+      <input type="hidden" name="_acao" value="salvar" />
+      {catEdicao && <input type="hidden" name="id" value={catEdicao.id} />}
+
+      <div class="grid">
+        <div class="c5">
+          <label>Nome da Categoria *</label>
+          <input
+            name="nome"
+            id="inp-cat-nome"
+            value={catEdicao?.nome ?? ''}
+            placeholder="Ex: Celulares e Smartphones, Informática, Moda..."
+            required
+          />
+        </div>
+
+        <div class="c2">
+          <label>Ícone selecionado *</label>
+          <input
+            name="icone"
+            id="inp-cat-icone"
+            value={iconeInicial}
+            maxlength="16"
+            required
+            style="font-size:20px;text-align:center;height:38px"
+          />
+        </div>
+
+        <div class="c2">
+          <label>Ordem de exibição</label>
+          <input
+            type="number"
+            name="ordem"
+            value={catEdicao?.ordem ?? 0}
+            step="1"
+          />
+        </div>
+
+        <div class="c3" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:16px">
+          <label class="check" style="font-weight:700">
+            <input type="checkbox" name="ativa" value="1" checked={(catEdicao?.ativa ?? 1) === 1} />
+            Ativa na loja
+          </label>
+          <div class="icon-preview-badge" title="Prévia de como ficará na loja (ícone acima do nome)">
+            <span id="prev-cat-ico" style="font-size:18px;line-height:1">{iconeInicial}</span>
+            <span id="prev-cat-txt" style="font-size:11.5px;font-weight:700;color:#1e293b">
+              {catEdicao?.nome || 'Categoria'}
+            </span>
+          </div>
+        </div>
+
+        <div class="c12">
+          <label>🎨 Lista de Ícones Mais Comumente Usados (clique em um ícone abaixo para selecioná-lo)</label>
+          <div class="icon-picker-grid" id="icon-picker-grid">
+            {ICONES_CATEGORIAS_COMUNS.map((item) => (
+              <button
+                type="button"
+                class={`icon-option-btn ${iconeInicial === item.icone ? 'selected' : ''}`}
+                data-icone={item.icone}
+                data-rotulo={item.rotulo}
+              >
+                <span class="ico">{item.icone}</span>
+                <span>{item.rotulo}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <button type="submit">{catEdicao ? '💾 Salvar Alterações da Categoria' : '➕ Cadastrar Categoria'}</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Categorias Cadastradas ({categorias.length})</h2>
+    {categorias.length === 0 ? (
+      <p class="muted">Nenhuma categoria cadastrada ainda. Use o formulário acima para criar a primeira.</p>
+    ) : (
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:90px;text-align:center">Visual na Loja</th>
+              <th>Nome da Categoria</th>
+              <th style="width:90px;text-align:center">Ordem</th>
+              <th style="width:120px;text-align:center">Produtos</th>
+              <th style="width:100px;text-align:center">Status</th>
+              <th style="width:190px;text-align:right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {categorias.map((c) => (
+              <tr>
+                <td style="text-align:center">
+                  <div style="display:inline-flex;flex-direction:column;align-items:center;gap:1px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:8px;background:#fff">
+                    <span style="font-size:17px;line-height:1">{c.icone || '📦'}</span>
+                    <span style="font-size:10px;font-weight:700;color:#334155">{c.nome.slice(0, 12)}</span>
+                  </div>
+                </td>
+                <td>
+                  <strong>{c.nome}</strong>
+                </td>
+                <td style="text-align:center">{c.ordem}</td>
+                <td style="text-align:center">
+                  <span class="tag">{c.qtd_produtos} produto{c.qtd_produtos === 1 ? '' : 's'}</span>
+                </td>
+                <td style="text-align:center">
+                  {c.ativa === 1 ? (
+                    <span class="tag" style="background:#dcfce7;color:#166534">Ativa</span>
+                  ) : (
+                    <span class="tag off">Inativa</span>
+                  )}
+                </td>
+                <td style="text-align:right">
+                  <div class="row" style="justify-content:flex-end;gap:6px">
+                    <a class="btn sec sm" href={`/categorias?editar=${c.id}`}>✏️ Editar</a>
+                    <form
+                      method="post"
+                      style="margin:0"
+                      onsubmit={`return confirm('Excluir a categoria "${c.nome}"? Os produtos continuarão existindo normalmente.');`}
+                    >
+                      <input type="hidden" name="_acao" value="excluir" />
+                      <input type="hidden" name="id" value={c.id} />
+                      <button type="submit" class="sm danger">Excluir</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+
+  <script is:inline>
+    (function () {
+      const inpNome = document.getElementById('inp-cat-nome');
+      const inpIcone = document.getElementById('inp-cat-icone');
+      const prevIco = document.getElementById('prev-cat-ico');
+      const prevTxt = document.getElementById('prev-cat-txt');
+      const btns = Array.from(document.querySelectorAll('#icon-picker-grid .icon-option-btn'));
+
+      function updateSelectedHighlight(val) {
+        btns.forEach((b) => {
+          b.classList.toggle('selected', b.getAttribute('data-icone') === val);
+        });
+      }
+
+      if (inpNome && prevTxt) {
+        inpNome.addEventListener('input', () => {
+          prevTxt.textContent = inpNome.value.trim() || 'Categoria';
+        });
+      }
+
+      if (inpIcone && prevIco) {
+        inpIcone.addEventListener('input', () => {
+          const val = inpIcone.value.trim() || '📦';
+          prevIco.textContent = val;
+          updateSelectedHighlight(val);
+        });
+      }
+
+      btns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const ico = btn.getAttribute('data-icone') || '📦';
+          const rotulo = btn.getAttribute('data-rotulo') || '';
+          if (inpIcone) inpIcone.value = ico;
+          if (prevIco) prevIco.textContent = ico;
+          if (inpNome && !inpNome.value.trim() && rotulo) {
+            inpNome.value = rotulo;
+            if (prevTxt) prevTxt.textContent = rotulo;
+          }
+          updateSelectedHighlight(ico);
+        });
+      });
+    })();
+  </script>
+</Layout>

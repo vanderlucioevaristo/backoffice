@@ -20,7 +20,7 @@ let emailTesteOk = false;
 let emp = await db()
   .prepare(
     `SELECT codigo, razao_social, nome_fantasia, cnpj,
-            loja_nome, loja_logo, loja_topo_imagem, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
+            loja_nome, loja_logo, loja_topo_imagem, cor_primaria, cor_secundaria, cor_fundo, cor_texto, cor_texto_categorias_topo,
             rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
             rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
             rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto,
@@ -62,6 +62,7 @@ if (Astro.request.method === 'POST') {
   const corSecundaria = validColor(str(f, 'cor_secundaria', 10), '#111827');
   const corFundo = validColor(str(f, 'cor_fundo', 10), '#f4f6f9');
   const corTexto = validColor(str(f, 'cor_texto', 10), '#1c2430');
+  const corTextoCategoriasTopo = validColor(str(f, 'cor_texto_categorias_topo', 10), '#ffffff');
   let lojaLogo = str(f, 'loja_logo', 300_000); // aceita URL ou Data-URL (base64)
   if (f.get('remover_logo')) lojaLogo = '';
   let lojaTopoImagem = str(f, 'loja_topo_imagem', 600_000); // aceita URL ou Data-URL (base64)
@@ -132,7 +133,7 @@ if (Astro.request.method === 'POST') {
     await db()
       .prepare(
         `UPDATE empresas
-            SET loja_nome = ?, loja_logo = ?, loja_topo_imagem = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?,
+            SET loja_nome = ?, loja_logo = ?, loja_topo_imagem = ?, cor_primaria = ?, cor_secundaria = ?, cor_fundo = ?, cor_texto = ?, cor_texto_categorias_topo = ?,
                 rodape_sobre = ?, rodape_telefone = ?, rodape_whatsapp = ?, rodape_email = ?,
                 rodape_horario = ?, rodape_endereco = ?, rodape_suporte = ?, rodape_instagram = ?,
                 rodape_facebook = ?, rodape_copyright = ?, rodape_cor_fundo = ?, rodape_cor_texto = ?,
@@ -154,6 +155,7 @@ if (Astro.request.method === 'POST') {
         corSecundaria,
         corFundo,
         corTexto,
+        corTextoCategoriasTopo,
         rodapeSobre || null,
         rodapeTelefone || null,
         rodapeWhatsapp || null,
@@ -204,6 +206,7 @@ if (Astro.request.method === 'POST') {
       cor_secundaria: corSecundaria,
       cor_fundo: corFundo,
       cor_texto: corTexto,
+      cor_texto_categorias_topo: corTextoCategoriasTopo,
       rodape_sobre: rodapeSobre,
       rodape_telefone: rodapeTelefone,
       rodape_whatsapp: rodapeWhatsapp,
@@ -801,20 +804,30 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
       </div>
       <div class="cfg-body">
       <div class="grid" style="margin-top:8px">
-        <div class="c3">
-          <label>Cor principal (botões e destaques)</label>
+        <div class="c2">
+          <label>Cor principal (botões)</label>
           <input type="color" name="cor_primaria" id="inp-cp" value={emp.cor_primaria || '#2563eb'} style="height:42px;padding:4px" />
         </div>
-        <div class="c3">
+        <div class="c2">
           <label>Cor do cabeçalho / topo</label>
           <input type="color" name="cor_secundaria" id="inp-cs" value={emp.cor_secundaria || '#111827'} style="height:42px;padding:4px" />
         </div>
-        <div class="c3">
+        <div class="c4">
+          <label>Cor do texto das categorias na barra de título</label>
+          <input
+            type="color"
+            name="cor_texto_categorias_topo"
+            id="inp-ct-cat"
+            value={emp.cor_texto_categorias_topo || '#2d3277'}
+            style="height:42px;padding:4px"
+          />
+        </div>
+        <div class="c2">
           <label>Cor de fundo da página</label>
           <input type="color" name="cor_fundo" id="inp-cf" value={emp.cor_fundo || '#f4f6f9'} style="height:42px;padding:4px" />
         </div>
-        <div class="c3">
-          <label>Cor dos textos</label>
+        <div class="c2">
+          <label>Cor dos textos da página</label>
           <input type="color" name="cor_texto" id="inp-ct" value={emp.cor_texto || '#1c2430'} style="height:42px;padding:4px" />
         </div>
       </div>
@@ -923,7 +936,9 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
           />
           <strong id="prev-nome" style="font-size:18px">{nomeExibicao}</strong>
           <span style="flex:1"></span>
-          <span style="font-size:13px;opacity:.85">Categorias · Carrinho (2)</span>
+          <span id="prev-top-cats" style={`font-size:13px;font-weight:600;color:${emp.cor_texto_categorias_topo || '#ffffff'}`}>
+            📱 Celulares · 💻 Informática · 🎧 Áudio
+          </span>
         </div>
         <div style="padding:20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
           <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;min-width:220px">
@@ -1029,9 +1044,11 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   const inpCs = document.getElementById('inp-cs');
   const inpCf = document.getElementById('inp-cf');
   const inpCt = document.getElementById('inp-ct');
+  const inpCtCat = document.getElementById('inp-ct-cat');
 
   const prevBox = document.getElementById('preview-box');
   const prevTop = document.getElementById('prev-top');
+  const prevTopCats = document.getElementById('prev-top-cats');
   const prevLogo = document.getElementById('prev-logo');
   const prevNome = document.getElementById('prev-nome');
   const prevBtn = document.getElementById('prev-btn');
@@ -1056,6 +1073,9 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
     prevBox.style.background = inpCf.value;
     prevBox.style.color = inpCt.value;
     prevTop.style.backgroundColor = inpCs.value;
+    if (prevTopCats && inpCtCat) {
+      prevTopCats.style.color = inpCtCat.value;
+    }
     if (inpTopoImg && inpTopoImg.value.trim()) {
       prevTop.style.backgroundImage = `url('${inpTopoImg.value.trim()}')`;
       prevTop.style.backgroundSize = 'cover';
@@ -1086,7 +1106,7 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
   }
 
   [
-    inpLogo, inpTopoImg, inpNome, inpCp, inpCs, inpCf, inpCt,
+    inpLogo, inpTopoImg, inpNome, inpCp, inpCs, inpCf, inpCt, inpCtCat,
     inpRtel, inpRwhats, inpRemail, inpRhor, inpRsobre, inpRsup, inpRend, inpRcf, inpRct,
   ].forEach((el) => el && el.addEventListener('input', syncPreview));
 

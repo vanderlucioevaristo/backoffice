@@ -66,17 +66,24 @@ const sp = Astro.url.searchParams;
 const cat = (sp.get('cat') ?? '').trim();
 const q = (sp.get('q') ?? '').trim().slice(0, 80);
 
-// Categorias que possuem ao menos 1 produto ativo com estoque >= 1
+// Categorias que possuem ao menos 1 produto ativo com estoque >= 1 (com ícone personalizado do cadastro de categorias)
 const { results: categoriasRows } = await db()
   .prepare(
-    `SELECT COALESCE(NULLIF(TRIM(categoria), ''), 'Geral') AS categoria, COUNT(*) AS qtd
-       FROM produtos
-      WHERE empresa_id = ? AND ativo = 1 AND estoque_atual >= 1
-      GROUP BY COALESCE(NULLIF(TRIM(categoria), ''), 'Geral')
-      ORDER BY categoria COLLATE NOCASE`,
+    `SELECT COALESCE(NULLIF(TRIM(p.categoria), ''), 'Geral') AS categoria,
+            COUNT(*) AS qtd,
+            MAX(c.icone) AS icone,
+            COALESCE(MIN(c.ordem), 999) AS ordem_cat
+       FROM produtos p
+       LEFT JOIN categorias c
+         ON c.empresa_id = p.empresa_id
+        AND c.ativa = 1
+        AND LOWER(TRIM(c.nome)) = LOWER(COALESCE(NULLIF(TRIM(p.categoria), ''), 'Geral'))
+      WHERE p.empresa_id = ? AND p.ativo = 1 AND p.estoque_atual >= 1
+      GROUP BY COALESCE(NULLIF(TRIM(p.categoria), ''), 'Geral')
+      ORDER BY ordem_cat ASC, categoria COLLATE NOCASE`,
   )
   .bind(empresa.id)
-  .all<{ categoria: string; qtd: number }>();
+  .all<{ categoria: string; qtd: number; icone: string | null }>();
 
 const where = ['p.empresa_id = ?', 'p.ativo = 1', 'p.estoque_atual >= 1'];
 const args: unknown[] = [empresa.id];
@@ -368,7 +375,7 @@ const baseUrl = `/loja/${empCodigo}`;
         href={`${baseUrl}?cat=${encodeURIComponent(c.categoria)}`}
         class={`ml-cat-chip ${cat === c.categoria ? 'on' : ''}`}
       >
-        <span class="cat-chip-ico" aria-hidden="true">{iconeCategoriaLoja(c.categoria)}</span>
+        <span class="cat-chip-ico" aria-hidden="true">{iconeCategoriaLoja(c.categoria, c.icone)}</span>
         <span class="cat-chip-lbl">
           {c.categoria} <span class="cat-chip-qtd">({c.qtd})</span>
         </span>

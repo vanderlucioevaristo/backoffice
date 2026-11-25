@@ -25,6 +25,8 @@ import {
   registrarFalhaTentativa,
   limparTentativasLogin,
   validarUrlExternaSegura,
+  ICONES_CATEGORIAS_COMUNS,
+  salvarCategoriaLoja,
   gerarManifestoPwaLoja,
   IDLE_TIMEOUT_SEC,
   IDLE_TIMEOUT_MS,
@@ -602,5 +604,46 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(validarUrlExternaSegura('https://169.254.169.254/latest/meta-data/'), false);
     assert.equal(validarUrlExternaSegura('https://localhost/webhook'), false);
     assert.equal(validarUrlExternaSegura('javascript:alert(1)'), false);
+  });
+
+  test('cadastra e edita categorias com ícone personalizado escolhido da lista de ícones comuns', async () => {
+    assert.ok(ICONES_CATEGORIAS_COMUNS.length >= 30);
+
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'loja-cats',
+      razao: 'LOJA CATEGORIAS LTDA',
+      nome: 'Admin Cats',
+      login: 'admin',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+
+    const nova = await salvarCategoriaLoja(ctx.d1, {
+      empresaId: cad.empresaId!,
+      nome: 'Games e Consoles',
+      icone: '🎮',
+      ordem: 1,
+      ativa: 1,
+    });
+    assert.equal(nova.ok, true);
+    assert.ok(nova.id);
+
+    const editada = await salvarCategoriaLoja(ctx.d1, {
+      id: nova.id,
+      empresaId: cad.empresaId!,
+      nome: 'Games & Retrô',
+      icone: '🕹️',
+      ordem: 2,
+      ativa: 1,
+    });
+    assert.equal(editada.ok, true);
+
+    const row = await ctx.d1
+      .prepare('SELECT nome, icone, ordem FROM categorias WHERE id = ?')
+      .bind(nova.id)
+      .first();
+    assert.equal(row.nome, 'Games & Retrô');
+    assert.equal(row.icone, '🕹️');
+    assert.equal(row.ordem, 2);
   });
 });

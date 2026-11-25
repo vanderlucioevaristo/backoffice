@@ -1,6 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
+import { iconeCategoriaLoja, sincronizarCategoriasProdutos } from '../../lib/empresa-service';
 import { str, onlyDigits, UNIDADES, parseNum, formatDoc } from '../../lib/validate';
 
 const u = Astro.locals.user!;
@@ -8,6 +9,14 @@ const idParam = Astro.params.id!;
 const isNew = idParam === 'novo';
 const id = Number(idParam);
 if (!isNew && !Number.isInteger(id)) return Astro.redirect('/produtos');
+
+await sincronizarCategoriasProdutos(db(), u.empresaId);
+
+// Lista de categorias cadastradas na empresa
+const { results: listaCategorias } = await db()
+  .prepare('SELECT id, nome, icone FROM categorias WHERE empresa_id = ? AND ativa = 1 ORDER BY ordem ASC, nome COLLATE NOCASE ASC')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string; icone: string }>();
 
 // Lista de fornecedores cadastrados na empresa (parceiros com eh_fornecedor = 1)
 const { results: listaFornecedores } = await db()
@@ -252,8 +261,16 @@ const rowsToRender: FornVinculo[] =
         </div>
 
         <div class="c3">
-          <label>Categoria / Grupo</label>
-          <input name="categoria" value={v('categoria')} />
+          <div class="row" style="justify-content:space-between;margin-bottom:4px">
+            <label style="margin:0">Categoria / Grupo</label>
+            <a href="/categorias" style="font-size:11.5px;font-weight:600">🏷️ Gerenciar categorias</a>
+          </div>
+          <input name="categoria" list="lista-categorias-cadastradas" value={v('categoria')} placeholder="Selecione ou digite..." />
+          <datalist id="lista-categorias-cadastradas">
+            {listaCategorias.map((cat) => (
+              <option value={cat.nome}>{cat.icone} {cat.nome}</option>
+            ))}
+          </datalist>
         </div>
         <div class="c3">
           <label>Marca / Fabricante</label>

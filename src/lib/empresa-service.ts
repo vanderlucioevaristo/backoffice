@@ -1364,10 +1364,52 @@ export function validarUrlExternaSegura(urlRaw?: string | null): boolean {
   }
 }
 
+export const ICONES_CATEGORIAS_COMUNS: Array<{ icone: string; rotulo: string }> = [
+  { icone: '📱', rotulo: 'Celulares e Smartphones' },
+  { icone: '💻', rotulo: 'Informática e Notebooks' },
+  { icone: '🎧', rotulo: 'Áudio, Fones e Som' },
+  { icone: '☕', rotulo: 'Eletroportáteis e Cozinha' },
+  { icone: '🏠', rotulo: 'Casa e Decoração' },
+  { icone: '💡', rotulo: 'Iluminação e Smart Home' },
+  { icone: '🛠️', rotulo: 'Ferramentas e Construção' },
+  { icone: '🏃', rotulo: 'Esporte, Fitness e Lazer' },
+  { icone: '📷', rotulo: 'Câmeras e Segurança' },
+  { icone: '⌚', rotulo: 'Relógios e Smartwatches' },
+  { icone: '🎮', rotulo: 'Games e Consoles' },
+  { icone: '📺', rotulo: 'TV e Vídeo' },
+  { icone: '🖨️', rotulo: 'Impressoras e Escritório' },
+  { icone: '👕', rotulo: 'Moda e Vestuário' },
+  { icone: '👟', rotulo: 'Calçados e Tênis' },
+  { icone: '🎒', rotulo: 'Bolsas e Mochilas' },
+  { icone: '💎', rotulo: 'Joias, Óculos e Acessórios' },
+  { icone: '💄', rotulo: 'Beleza, Cosméticos e Perfumaria' },
+  { icone: '💊', rotulo: 'Saúde e Farmácia' },
+  { icone: '🛒', rotulo: 'Alimentos e Supermercado' },
+  { icone: '🍷', rotulo: 'Bebidas e Adega' },
+  { icone: '🐾', rotulo: 'Pet Shop e Animais' },
+  { icone: '🧸', rotulo: 'Brinquedos e Infantil' },
+  { icone: '📚', rotulo: 'Livros e Papelaria' },
+  { icone: '🚗', rotulo: 'Automotivo e Peças' },
+  { icone: '🛋️', rotulo: 'Móveis e Estofados' },
+  { icone: '❄️', rotulo: 'Ar-Condicionado e Climatização' },
+  { icone: '🧹', rotulo: 'Limpeza e Lavanderia' },
+  { icone: '🌱', rotulo: 'Jardim, Camping e Pesca' },
+  { icone: '🎸', rotulo: 'Instrumentos Musicais' },
+  { icone: '⚡', rotulo: 'Elétrica e Energia Solar' },
+  { icone: '🎁', rotulo: 'Presentes e Festas' },
+  { icone: '🔥', rotulo: 'Ofertas e Queima de Estoque' },
+  { icone: '⭐', rotulo: 'Destaques e Lançamentos' },
+  { icone: '🛍️', rotulo: 'Sacola / Compras Gerais' },
+  { icone: '📦', rotulo: 'Geral / Outros Produtos' },
+];
+
 /**
  * Retorna um ícone representativo para cada categoria de produto da loja virtual.
  */
-export function iconeCategoriaLoja(categoriaRaw?: string | null): string {
+export function iconeCategoriaLoja(categoriaRaw?: string | null, iconeCustom?: string | null): string {
+  const custom = String(iconeCustom ?? '').trim();
+  if (custom) return custom;
+
   const c = String(categoriaRaw ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -1394,6 +1436,106 @@ export function iconeCategoriaLoja(categoriaRaw?: string | null): string {
   if (c.includes('brinquedo') || c.includes('infantil') || c.includes('bebe')) return '🧸';
   if (c.includes('saude') || c.includes('farmacia')) return '💊';
   return '📦';
+}
+
+/**
+ * Importa automaticamente para a tabela `categorias` quaisquer categorias já utilizadas nos produtos da empresa.
+ */
+export async function sincronizarCategoriasProdutos(database: any, empresaId: number): Promise<void> {
+  try {
+    const { results } = await database
+      .prepare(
+        `SELECT DISTINCT TRIM(categoria) AS nome
+           FROM produtos
+          WHERE empresa_id = ?
+            AND categoria IS NOT NULL
+            AND TRIM(categoria) <> ''`,
+      )
+      .bind(empresaId)
+      .all();
+
+    for (const r of results || []) {
+      const nome = String(r?.nome ?? '').trim();
+      if (!nome) continue;
+      const iconePadrao = iconeCategoriaLoja(nome);
+      await database
+        .prepare('INSERT OR IGNORE INTO categorias (empresa_id, nome, icone, ativa) VALUES (?, ?, ?, 1)')
+        .bind(empresaId, nome, iconePadrao)
+        .run();
+    }
+  } catch {
+    // Ignora caso a tabela ainda não exista em banco antigo
+  }
+}
+
+export async function salvarCategoriaLoja(
+  database: any,
+  dados: {
+    id?: number;
+    empresaId: number;
+    nome: string;
+    icone: string;
+    ordem?: number;
+    ativa?: number;
+  },
+): Promise<{ ok: boolean; erro?: string; id?: number }> {
+  const nome = String(dados.nome ?? '').trim().slice(0, 80);
+  const icone = String(dados.icone ?? '').trim().slice(0, 16) || iconeCategoriaLoja(nome);
+  const ordem = Number.isFinite(Number(dados.ordem)) ? Math.round(Number(dados.ordem)) : 0;
+  const ativa = dados.ativa === 0 ? 0 : 1;
+
+  if (!nome) {
+    return { ok: false, erro: 'Informe o nome da categoria.' };
+  }
+
+  if (dados.id && Number(dados.id) > 0) {
+    const id = Number(dados.id);
+    const atual = await database
+      .prepare('SELECT id, nome FROM categorias WHERE id = ? AND empresa_id = ?')
+      .bind(id, dados.empresaId)
+      .first();
+    if (!atual) {
+      return { ok: false, erro: 'Categoria não encontrada.' };
+    }
+
+    const dup = await database
+      .prepare('SELECT 1 FROM categorias WHERE empresa_id = ? AND LOWER(nome) = LOWER(?) AND id <> ?')
+      .bind(dados.empresaId, nome, id)
+      .first();
+    if (dup) {
+      return { ok: false, erro: 'Já existe outra categoria com este nome.' };
+    }
+
+    await database
+      .prepare('UPDATE categorias SET nome = ?, icone = ?, ordem = ?, ativa = ? WHERE id = ? AND empresa_id = ?')
+      .bind(nome, icone, ordem, ativa, id, dados.empresaId)
+      .run();
+
+    // Se o nome da categoria foi alterado, atualiza os produtos vinculados ao nome antigo
+    if (atual.nome && String(atual.nome) !== nome) {
+      await database
+        .prepare('UPDATE produtos SET categoria = ? WHERE empresa_id = ? AND LOWER(TRIM(categoria)) = LOWER(TRIM(?))')
+        .bind(nome, dados.empresaId, String(atual.nome))
+        .run();
+    }
+
+    return { ok: true, id };
+  }
+
+  const dup = await database
+    .prepare('SELECT id FROM categorias WHERE empresa_id = ? AND LOWER(nome) = LOWER(?)')
+    .bind(dados.empresaId, nome)
+    .first();
+  if (dup) {
+    return { ok: false, erro: 'Esta categoria já está cadastrada.' };
+  }
+
+  const ins = await database
+    .prepare('INSERT INTO categorias (empresa_id, nome, icone, ordem, ativa) VALUES (?, ?, ?, ?, ?) RETURNING id')
+    .bind(dados.empresaId, nome, icone, ordem, ativa)
+    .first();
+
+  return { ok: true, id: ins?.id };
 }
 
 export function gerarManifestoPwaLoja(empresa: {

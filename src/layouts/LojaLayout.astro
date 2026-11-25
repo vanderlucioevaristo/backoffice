@@ -11,7 +11,7 @@ interface Props {
   qtdCarrinho?: number;
   busca?: string;
   catAtiva?: string;
-  categorias?: Array<{ categoria: string; qtd: number }>;
+  categorias?: Array<{ categoria: string; qtd: number; icone?: string | null }>;
   bare?: boolean;
 }
 const {
@@ -48,6 +48,10 @@ const r = parseInt(hex.slice(0, 2) || 'ff', 16);
 const g = parseInt(hex.slice(2, 4) || 'e6', 16);
 const b = parseInt(hex.slice(4, 6) || '00', 16);
 const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ffffff';
+const catHeaderText =
+  empresa.cor_texto_categorias_topo && /^#[0-9a-fA-F]{6}$/.test(empresa.cor_texto_categorias_topo)
+    ? empresa.cor_texto_categorias_topo
+    : headerText;
 ---
 <!doctype html>
 <html lang="pt-BR">
@@ -66,6 +70,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
       pr: primaryColor,
       topBg: headerBg,
       topTx: headerText,
+      topCatTx: catHeaderText,
       bg: pageBg,
       tx: textColor,
       ftBg: footerBg,
@@ -176,8 +181,8 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
         flex: 1;
       }
       .ml-cats a {
-        color: var(--topTx);
-        opacity: 0.88;
+        color: var(--topCatTx) !important;
+        opacity: 0.92;
         text-decoration: none;
         display: inline-flex;
         flex-direction: column;
@@ -1079,7 +1084,7 @@ const headerText = (r * 299 + g * 587 + b * 114) / 1000 > 155 ? '#2d3277' : '#ff
                   href={`${baseUrl}?cat=${encodeURIComponent(c.categoria)}`}
                   class={catAtiva === c.categoria ? 'on' : ''}
                 >
-                  <span class="nav-cat-ico">{iconeCategoriaLoja(c.categoria)}</span>
+                  <span class="nav-cat-ico">{iconeCategoriaLoja(c.categoria, c.icone)}</span>
                   <span class="nav-cat-txt">{c.categoria}</span>
                 </a>
               ))}

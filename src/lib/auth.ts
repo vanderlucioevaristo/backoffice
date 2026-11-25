@@ -287,6 +287,16 @@ export async function ensureSchema(): Promise<void> {
         bloqueado_ate TEXT,
         atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
       )`,
+      `CREATE TABLE IF NOT EXISTS categorias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        nome TEXT NOT NULL,
+        icone TEXT NOT NULL DEFAULT '📦',
+        ordem INTEGER NOT NULL DEFAULT 0,
+        ativa INTEGER NOT NULL DEFAULT 1,
+        criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (empresa_id, nome)
+      )`,
     ];
 
     for (const sql of tables) {
@@ -370,6 +380,7 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE empresas ADD COLUMN email_remetente TEXT DEFAULT 'onboarding@resend.dev'",
       "ALTER TABLE empresas ADD COLUMN email_webhook_url TEXT",
       "ALTER TABLE empresas ADD COLUMN loja_topo_imagem TEXT",
+      "ALTER TABLE empresas ADD COLUMN cor_texto_categorias_topo TEXT",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});
@@ -502,6 +513,7 @@ export type LojaEmpresa = {
   cor_secundaria: string;
   cor_fundo: string;
   cor_texto: string;
+  cor_texto_categorias_topo: string | null;
   rodape_sobre: string | null;
   rodape_telefone: string | null;
   rodape_whatsapp: string | null;
@@ -543,7 +555,7 @@ export async function getLojaEmpresa(codigo: string): Promise<LojaEmpresa | null
     .prepare(
       `SELECT id, codigo, COALESCE(NULLIF(loja_nome,''), nome_fantasia, razao_social) AS nome,
               razao_social, cnpj,
-              loja_logo, loja_topo_imagem, cor_primaria, cor_secundaria, cor_fundo, cor_texto,
+              loja_logo, loja_topo_imagem, cor_primaria, cor_secundaria, cor_fundo, cor_texto, cor_texto_categorias_topo,
               rodape_sobre, rodape_telefone, rodape_whatsapp, rodape_email,
               rodape_horario, rodape_endereco, rodape_suporte, rodape_instagram,
               rodape_facebook, rodape_copyright, rodape_cor_fundo, rodape_cor_texto,

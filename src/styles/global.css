@@ -15,7 +15,7 @@ label { display:block; font-size:13px; color:var(--mu); margin-bottom:4px; }
 input, select, textarea { width:100%; padding:8px 10px; border:1px solid var(--bd); border-radius:6px; font:inherit; background:#fff; }
 input:focus, select:focus, textarea:focus { outline:2px solid #bfdbfe; border-color:var(--pr); }
 .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:12px; }
-.c2{grid-column:span 2}.c3{grid-column:span 3}.c4{grid-column:span 4}.c6{grid-column:span 6}.c8{grid-column:span 8}.c12{grid-column:span 12}
+.c2{grid-column:span 2}.c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c9{grid-column:span 9}.c10{grid-column:span 10}.c12{grid-column:span 12}
 @media (max-width:720px){ .grid > * { grid-column:span 12 !important; } }
 .check { display:flex; align-items:center; gap:8px; color:var(--tx); font-size:15px; } .check input { width:auto; }
 .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }

@@ -100,7 +100,7 @@ if (Astro.request.method === 'POST') {
   const mostrarFreteVitrine = freteProvedor === 'CEPCERTO' ? 0 : f.get('mostrar_frete_vitrine') ? 1 : 0;
   const nubankPixAtivo = f.get('nubank_pix_ativo') ? 1 : 0;
   const nubankLinkAtivo = f.get('nubank_link_ativo') ? 1 : 0;
-  const nubankChavePix = str(f, 'nubank_chave_pix', 140);
+  const nubankChavePix = str(f, 'nubank_chave_pix', 140).replace(/\s+/g, '');
   const nubankCidadePix = str(f, 'nubank_cidade_pix', 30) || 'SAO PAULO';
   const nubankLinkPadrao = str(f, 'nubank_link_padrao', 400);
   const nupayMerchantKey = str(f, 'nupay_merchant_key', 160);
@@ -582,73 +582,100 @@ const nomeExibicao = emp.loja_nome || emp.nome_fantasia || emp.razao_social;
       <p class="muted" style="margin-top:8px;font-size:13px">
         Configure sua chave Pix do Nubank para gerar automaticamente o <strong>QR Code Pix + Copia e Cola</strong> com o valor exato do pedido, o link de cobrança do Nubank PJ ou suas credenciais da API comercial <strong>NuPay for Business</strong>.
       </p>
-      <div class="grid">
+
+      <!-- Bloco 1: Ativação das formas de pagamento Nubank -->
+      <div class="grid" style="margin-bottom:14px">
         <div class="c6">
-          <label class="check" style="font-size:14.5px;font-weight:700;color:#581c87;padding:10px 12px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px">
+          <label class="check" style="font-size:14.5px;font-weight:700;color:#581c87;padding:12px 14px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px">
             <input type="checkbox" name="nubank_pix_ativo" value="1" checked={(emp.nubank_pix_ativo ?? 1) === 1} />
             Habilitar opção "💠 Pix Nubank (QR Code + Copia e Cola)" na Loja
           </label>
         </div>
         <div class="c6">
-          <label class="check" style="font-size:14.5px;font-weight:700;color:#581c87;padding:10px 12px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px">
+          <label class="check" style="font-size:14.5px;font-weight:700;color:#581c87;padding:12px 14px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px">
             <input type="checkbox" name="nubank_link_ativo" value="1" checked={(emp.nubank_link_ativo ?? 1) === 1} />
             Habilitar opção "💜 Link de Pagamento Nubank / NuPay" na Loja
           </label>
         </div>
         <div class="c12">
           <small class="muted">
-            Você pode marcar ou desmarcar cada opção quando quiser. Se ambas estiverem desmarcadas, o cliente finalizará o pedido normalmente sem exibir cobrança online no carrinho.
+            Você pode marcar ou desmarcar cada opção quando quiser. Se ambas estiverem desmarcadas, o cliente finalizará o pedido normalmente sem exibir cobrança online do Nubank no carrinho.
           </small>
         </div>
+      </div>
 
-        <div class="c5">
-          <label>Chave Pix da conta Nubank (CNPJ, CPF, e-mail, celular ou EVP)</label>
-          <input
-            name="nubank_chave_pix"
-            value={emp.nubank_chave_pix ?? emp.cnpj ?? ''}
-            placeholder="Ex: 65.491.970/0001-82 ou seu@email.com"
-          />
-          <small class="muted" style="display:block;margin-top:3px">
-            Gera o código Pix Copia e Cola e QR Code automaticamente no fechamento do pedido.
-          </small>
+      <!-- Bloco 2: Configuração de Pix (QR Code e Copia e Cola) -->
+      <div style="padding:16px 18px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:14px">
+        <div style="font-size:14px;font-weight:800;color:#6b21a8;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+          <span>💠 Dados para Geração Automática do Pix (QR Code + Copia e Cola)</span>
         </div>
-        <div class="c3">
-          <label>Cidade do titular (padrão BR Code)</label>
-          <input
-            name="nubank_cidade_pix"
-            value={emp.nubank_cidade_pix || 'SAO PAULO'}
-            maxlength="15"
-            placeholder="SAO PAULO"
-          />
+        <div class="grid">
+          <div class="c12">
+            <label style="font-weight:700;color:#3b0764;font-size:14px">
+              Chave Pix da conta Nubank (CNPJ, CPF, E-mail, Celular ou Chave Aleatória EVP completa)
+            </label>
+            <input
+              name="nubank_chave_pix"
+              value={emp.nubank_chave_pix ?? emp.cnpj ?? ''}
+              placeholder="Ex: 123e4567-e89b-12d3-a456-426614174000, 65.491.970/0001-82 ou seu@email.com.br"
+              style="width:100%;height:46px;font-size:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-weight:700;letter-spacing:0.3px;padding:10px 14px;border:2px solid #c084fc;border-radius:8px;background:#ffffff;color:#1e1b4b"
+            />
+            <small class="muted" style="display:block;margin-top:5px">
+              Campo de 1 linha em largura total para visualizar a chave aleatória (UUID de 36 caracteres), CNPJ, CPF, celular ou e-mail por completo.
+            </small>
+          </div>
+          <div class="c6">
+            <label style="font-weight:700;color:#3b0764">Cidade do titular (padrão BR Code)</label>
+            <input
+              name="nubank_cidade_pix"
+              value={emp.nubank_cidade_pix || 'SAO PAULO'}
+              maxlength="15"
+              placeholder="SAO PAULO"
+              style="height:44px;font-size:15.5px;padding:10px 12px;text-transform:uppercase"
+            />
+            <small class="muted" style="display:block;margin-top:4px">
+              Até 15 caracteres sem acentos (ex.: SAO PAULO).
+            </small>
+          </div>
         </div>
-        <div class="c4">
-          <label>Link de Cobrança Nubank PJ padrão (opcional)</label>
-          <input
-            name="nubank_link_padrao"
-            value={emp.nubank_link_padrao ?? ''}
-            placeholder="https://nubank.com.br/cobrar/..."
-          />
-          <small class="muted" style="display:block;margin-top:3px">
-            Você também pode colar um link específico por pedido em Pedidos.
-          </small>
-        </div>
+      </div>
 
-        <div class="c6">
-          <label>API NuPay for Business — Merchant Key (X-Merchant-Key, opcional)</label>
-          <input
-            name="nupay_merchant_key"
-            value={emp.nupay_merchant_key ?? ''}
-            placeholder="Chave comercial NuPay for Business (se possuir contrato)"
-          />
+      <!-- Bloco 3: Link de Cobrança Nubank PJ e Credenciais NuPay -->
+      <div style="padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
+        <div style="font-size:13.5px;font-weight:800;color:#334155;margin-bottom:10px;display:flex;align-items:center;gap:6px">
+          <span>🔗 Link de Cobrança Nubank PJ e Credenciais NuPay for Business (Opcional)</span>
         </div>
-        <div class="c6">
-          <label>API NuPay for Business — Merchant Token (X-Merchant-Token, opcional)</label>
-          <input
-            type="password"
-            name="nupay_merchant_token"
-            value={emp.nupay_merchant_token ?? ''}
-            placeholder="Token comercial NuPay for Business"
-          />
+        <div class="grid">
+          <div class="c12">
+            <label style="font-weight:600;color:#1e293b">Link de Cobrança Nubank PJ padrão (opcional)</label>
+            <input
+              name="nubank_link_padrao"
+              value={emp.nubank_link_padrao ?? ''}
+              placeholder="https://nubank.com.br/cobrar/..."
+              style="padding:10px 12px"
+            />
+            <small class="muted" style="display:block;margin-top:4px">
+              Link fixo da sua conta Nubank PJ. Você também pode colar um link específico individualmente dentro de cada pedido em <strong>Pedidos</strong>.
+            </small>
+          </div>
+
+          <div class="c6">
+            <label>API NuPay for Business — Merchant Key (<code>X-Merchant-Key</code>, opcional)</label>
+            <input
+              name="nupay_merchant_key"
+              value={emp.nupay_merchant_key ?? ''}
+              placeholder="Chave comercial NuPay for Business (se possuir contrato)"
+            />
+          </div>
+          <div class="c6">
+            <label>API NuPay for Business — Merchant Token (<code>X-Merchant-Token</code>, opcional)</label>
+            <input
+              type="password"
+              name="nupay_merchant_token"
+              value={emp.nupay_merchant_token ?? ''}
+              placeholder="Token comercial NuPay for Business"
+            />
+          </div>
         </div>
       </div>
       </div>

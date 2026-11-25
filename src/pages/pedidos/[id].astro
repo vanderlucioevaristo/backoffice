@@ -397,19 +397,19 @@ const somaItens = itens.reduce((acc, it) => acc + Number(it.subtotal), 0);
 
       <div class="c12">
         <label>Código Pix Copia e Cola Nubank (gerado automaticamente com o valor de {formatMoney(pedido.valor_total)})</label>
-        <div class="row" style="gap:8px">
-          <input
+        <div class="row" style="gap:8px;align-items:stretch">
+          <textarea
             id="inp-pix-admin"
             readonly
-            value={pedido.nubank_pix_copia_cola ?? 'Clique em "Gerar/Atualizar Pix Nubank" abaixo (configure sua Chave Pix em Minha Loja)'}
+            rows="3"
             onclick="this.select()"
-            style="font-family:monospace;font-size:12px;background:#faf5ff"
-          />
+            style="flex:1;min-height:72px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.45;background:#faf5ff;border:1.5px solid #c084fc;word-break:break-all;resize:vertical"
+          >{pedido.nubank_pix_copia_cola ?? 'Clique em "Gerar/Atualizar Pix Nubank" abaixo (configure sua Chave Pix em Minha Loja)'}</textarea>
           {pedido.nubank_pix_copia_cola && (
             <button
               type="button"
               class="btn sec sm"
-              style="white-space:nowrap"
+              style="white-space:nowrap;align-self:center;padding:10px 14px"
               onclick="navigator.clipboard.writeText(document.getElementById('inp-pix-admin').value);this.textContent='✓ Copiado!';"
             >
               📋 Copiar Pix

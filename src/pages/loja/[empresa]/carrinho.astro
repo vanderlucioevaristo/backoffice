@@ -203,8 +203,8 @@ if (Astro.request.method === 'POST') {
       const ped = await db()
         .prepare(
           `INSERT INTO loja_pedidos
-             (empresa_id, parceiro_id, valor_total, valor_frete, frete_modalidade, frete_prazo_dias, cep_entrega, forma_pagamento, pagamento_status, observacoes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDENTE', ?) RETURNING id`,
+             (empresa_id, parceiro_id, valor_total, valor_frete, frete_modalidade, frete_prazo_dias, cep_entrega, forma_pagamento, pagamento_status, observacoes, visto_admin)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDENTE', ?, 0) RETURNING id`,
         )
         .bind(
           empresa.id,

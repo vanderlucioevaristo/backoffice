@@ -29,6 +29,15 @@ let pedido = await db()
 
 if (!pedido) return Astro.redirect('/pedidos');
 
+// Ao abrir os detalhes do pedido no Backoffice, marca automaticamente como visto pelo administrador
+if (Number(pedido.visto_admin ?? 1) === 0) {
+  await db()
+    .prepare('UPDATE loja_pedidos SET visto_admin = 1 WHERE id = ? AND empresa_id = ?')
+    .bind(id, u.empresaId)
+    .run();
+  pedido.visto_admin = 1;
+}
+
 const { results: itens } = await db()
   .prepare(
     `SELECT i.*, pr.codigo, pr.nome AS produto_nome, pr.unidade, pr.foto, pr.estoque_atual, pr.preco_custo

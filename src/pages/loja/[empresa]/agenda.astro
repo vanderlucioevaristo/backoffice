@@ -81,6 +81,7 @@ if (Astro.request.method === 'POST' && empresa.agenda_ativa === 1) {
     msgOk = 'Seu agendamento foi cancelado e o horário foi liberado.';
   } else {
     const servicoId = Number(f.get('servico_id')) || 0;
+    const profissionalId = Number(f.get('profissional_id')) || null;
     const dataForm = String(f.get('data') ?? dataSel).trim();
     const horaInicio = String(f.get('hora_inicio') ?? '').trim();
     const observacoes = str(f, 'observacoes', 400);
@@ -91,6 +92,7 @@ if (Astro.request.method === 'POST' && empresa.agenda_ativa === 1) {
       empresaId: empresa.id,
       parceiroId: cliente.id,
       servicoId,
+      profissionalId,
       data: dataSel,
       horaInicio,
       observacoes,
@@ -101,7 +103,8 @@ if (Astro.request.method === 'POST' && empresa.agenda_ativa === 1) {
     });
 
     if (res.ok) {
-      msgOk = `Agendamento confirmado para ${dataSel.split('-').reverse().join('/')} das ${res.horaInicio} às ${res.horaFim}!`;
+      const txtProf = res.profissionalNome ? ` com ${res.profissionalNome}` : '';
+      msgOk = `Agendamento confirmado para ${dataSel.split('-').reverse().join('/')} das ${res.horaInicio} às ${res.horaFim}${txtProf}!`;
     } else {
       msgErro = res.erro || 'Não foi possível realizar o agendamento.';
     }
@@ -119,6 +122,28 @@ const { results: servicos } = await db()
   .bind(empresa.id)
   .all<{ id: number; nome: string; descricao: string | null; duracao_minutos: number; preco: number }>();
 
+const { results: profissionaisAtivos } = await db()
+  .prepare('SELECT id, nome, especialidade FROM profissionais WHERE empresa_id = ? AND ativo = 1 ORDER BY nome COLLATE NOCASE ASC')
+  .bind(empresa.id)
+  .all<{ id: number; nome: string; especialidade: string | null }>();
+
+const { results: vinculosServProf } = await db()
+  .prepare('SELECT servico_id, profissional_id FROM servicos_profissionais WHERE empresa_id = ?')
+  .bind(empresa.id)
+  .all<{ servico_id: number; profissional_id: number }>();
+
+// Mapa: servicoId -> array de profissionais ativos aptos a prestar aquele serviço
+const mapaProfissionaisPorServico: Record<number, Array<{ id: number; nome: string; especialidade: string | null }>> = {};
+for (const s of servicos) {
+  const vincs = (vinculosServProf || []).filter((v) => Number(v.servico_id) === s.id);
+  if (vincs.length > 0) {
+    const idsVinc = new Set(vincs.map((v) => Number(v.profissional_id)));
+    mapaProfissionaisPorServico[s.id] = (profissionaisAtivos || []).filter((p) => idsVinc.has(p.id));
+  } else {
+    mapaProfissionaisPorServico[s.id] = [...(profissionaisAtivos || [])];
+  }
+}
+
 const statusDiaSelecionado = verificarDiaFuncionamentoAgenda(dataSel, diasSemanaCfg, datasFechadasCfg);
 const diasFuncionamentoTexto = DIAS_SEMANA_LABELS.filter((d) =>
   String(diasSemanaCfg)
@@ -130,7 +155,7 @@ const diasFuncionamentoTexto = DIAS_SEMANA_LABELS.filter((d) =>
   .join(', ');
 
 // Visão blindada da agenda no dia selecionado:
-// Outros clientes aparecem apenas como { tipo: 'OCUPADO', horaInicio, horaFim }
+// Outros clientes aparecem apenas como { tipo: 'OCUPADO', horaInicio, horaFim, servicoId, profissionalId }
 const ocupacoesDia = await listarVisaoAgendaCliente(db(), {
   empresaId: empresa.id,
   parceiroId: cliente.id,
@@ -141,9 +166,11 @@ const ocupacoesDia = await listarVisaoAgendaCliente(db(), {
 const { results: meusAgendamentos } = await db()
   .prepare(
     `SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco, a.status, a.observacoes,
-            s.nome AS servico_nome
+            s.nome AS servico_nome,
+            pr.nome AS profissional_nome
        FROM agendamentos a
        JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
+       LEFT JOIN profissionais pr ON pr.id = a.profissional_id AND pr.empresa_id = a.empresa_id
       WHERE a.empresa_id = ? AND a.parceiro_id = ?
       ORDER BY a.data DESC, a.hora_inicio DESC
       LIMIT 30`,
@@ -159,15 +186,14 @@ const passoMin = Math.max(10, Number(empresa.agenda_intervalo_min) || 30);
 type GradeSlot = {
   hora: string;
   min: number;
-  estado: 'DISPONIVEL' | 'OCUPADO' | 'MEU';
-  meuDetalhe?: {
+  meusDetalhes: Array<{
     id: number;
     servicoNome: string;
+    profissionalNome: string | null;
     horaInicio: string;
     horaFim: string;
     status: string;
-  };
-  intervaloOcupado?: string;
+  }>;
 };
 
 const gradeHorarios: GradeSlot[] = [];
@@ -176,36 +202,28 @@ if (inicioExpMin >= 0 && fimExpMin > inicioExpMin) {
     const hStr = minutosParaHora(m);
     const slotFimMin = m + passoMin;
 
-    // Verifica se este bloco colide com alguma ocupação do dia
-    const colisao = ocupacoesDia.find((oc) => {
-      const ocIni = horaParaMinutos(oc.horaInicio);
-      const ocFim = horaParaMinutos(oc.horaFim);
-      return ocIni < slotFimMin && ocFim > m;
-    });
+    // Agendamentos do próprio cliente logado que cobrem este bloco de horário
+    const meusNoBloco = ocupacoesDia
+      .filter((oc): oc is Extract<typeof oc, { tipo: 'MEU' }> => {
+        if (oc.tipo !== 'MEU') return false;
+        const ocIni = horaParaMinutos(oc.horaInicio);
+        const ocFim = horaParaMinutos(oc.horaFim);
+        return ocIni < slotFimMin && ocFim > m;
+      })
+      .map((oc) => ({
+        id: oc.id,
+        servicoNome: oc.servicoNome,
+        profissionalNome: oc.profissionalNome,
+        horaInicio: oc.horaInicio,
+        horaFim: oc.horaFim,
+        status: oc.status,
+      }));
 
-    if (!colisao) {
-      gradeHorarios.push({ hora: hStr, min: m, estado: 'DISPONIVEL' });
-    } else if (colisao.tipo === 'MEU') {
-      gradeHorarios.push({
-        hora: hStr,
-        min: m,
-        estado: 'MEU',
-        meuDetalhe: {
-          id: colisao.id,
-          servicoNome: colisao.servicoNome,
-          horaInicio: colisao.horaInicio,
-          horaFim: colisao.horaFim,
-          status: colisao.status,
-        },
-      });
-    } else {
-      gradeHorarios.push({
-        hora: hStr,
-        min: m,
-        estado: 'OCUPADO',
-        intervaloOcupado: `${colisao.horaInicio} às ${colisao.horaFim}`,
-      });
-    }
+    gradeHorarios.push({
+      hora: hStr,
+      min: m,
+      meusDetalhes: meusNoBloco,
+    });
   }
 }
 
@@ -358,6 +376,15 @@ function formatDataBr(ymd: string): string {
                 </select>
               </p>
 
+              {profissionaisAtivos.length > 0 && (
+                <p id="box-sel-profissional">
+                  <label for="sel-profissional">Profissional (opcional — ou escolha "Qualquer profissional disponível")</label>
+                  <select id="sel-profissional" name="profissional_id">
+                    <option value="">👩‍⚕️ Qualquer profissional disponível no horário</option>
+                  </select>
+                </p>
+              )}
+
               <p>
                 <label for="inp-hora">Horário de início selecionado *</label>
                 <input
@@ -413,46 +440,46 @@ function formatDataBr(ymd: string): string {
           ) : (
             <>
               <p class="muted" style="font-size:12.5px;margin:6px 0 12px">
-                Horários reservados por outros clientes aparecem bloqueados como <strong>Indisponível</strong>. Seus próprios agendamentos são destacados em azul.
+                A disponibilidade de cada horário é calculada automaticamente de acordo com os <strong>profissionais que atendem o serviço selecionado</strong>. Se houver mais de um profissional disponível, o horário continua aberto para novas marcações!
               </p>
 
               <div
                 class="ag-slots-grid"
                 id="grade-slots"
                 data-fim-expediente={fimExpMin}
+                data-passo-min={passoMin}
+                data-profs-por-servico={JSON.stringify(mapaProfissionaisPorServico)}
                 data-ocupacoes={JSON.stringify(
                   ocupacoesDia.map((o) => ({
                     ini: horaParaMinutos(o.horaInicio),
                     fim: horaParaMinutos(o.horaFim),
+                    servicoId: o.servicoId ?? 0,
+                    profissionalId: o.profissionalId ?? null,
+                    meu: o.tipo === 'MEU',
                   })),
                 )}
               >
-                {gradeHorarios.map((slot) =>
-                  slot.estado === 'DISPONIVEL' ? (
-                    <button
-                      type="button"
-                      class="ag-slot livre"
-                      data-hora={slot.hora}
-                      data-min={slot.min}
-                    >
-                      <span class="ag-slot-time">🕒 {slot.hora}</span>
-                      <span class="ag-slot-status status-txt">🟢 Disponível</span>
-                    </button>
-                  ) : slot.estado === 'MEU' && slot.meuDetalhe ? (
-                    <div class="ag-slot meu">
-                      <span class="ag-slot-time">📅 {slot.hora}</span>
-                      <span class="ag-slot-status">✅ Meu agendamento</span>
-                      <small style="font-size:11px;line-height:1.25">
-                        <strong>{slot.meuDetalhe.servicoNome}</strong> ({slot.meuDetalhe.horaInicio}–{slot.meuDetalhe.horaFim})
+                {gradeHorarios.map((slot) => (
+                  <button
+                    type="button"
+                    class="ag-slot livre"
+                    data-hora={slot.hora}
+                    data-min={slot.min}
+                  >
+                    <span class="ag-slot-time">🕒 {slot.hora}</span>
+                    <span class="ag-slot-status status-txt">🟢 Disponível</span>
+                    {slot.meusDetalhes.length > 0 && (
+                      <small style="font-size:10.5px;line-height:1.25;color:#1e3a8a;background:#dbeafe;padding:2px 6px;border-radius:6px;margin-top:2px">
+                        {slot.meusDetalhes.map((md) => (
+                          <div>
+                            ✅ Meu: <strong>{md.servicoNome}</strong>
+                            {md.profissionalNome ? ` (${md.profissionalNome})` : ''}
+                          </div>
+                        ))}
                       </small>
-                    </div>
-                  ) : (
-                    <div class="ag-slot ocupado" title="Horário já reservado">
-                      <span class="ag-slot-time">🔒 {slot.hora}</span>
-                      <span class="ag-slot-status">Indisponível</span>
-                    </div>
-                  ),
-                )}
+                    )}
+                  </button>
+                ))}
               </div>
             </>
           )}
@@ -470,6 +497,7 @@ function formatDataBr(ymd: string): string {
               <tr>
                 <th>Data e Horário</th>
                 <th>Serviço / Procedimento</th>
+                <th>Profissional</th>
                 <th>Duração</th>
                 <th class="num">Valor</th>
                 <th>Status</th>
@@ -488,6 +516,13 @@ function formatDataBr(ymd: string): string {
                   <td>
                     <strong>{m.servico_nome}</strong>
                     {m.observacoes && <div class="muted" style="font-size:12px">Obs: {m.observacoes}</div>}
+                  </td>
+                  <td>
+                    {m.profissional_nome ? (
+                      <span class="tag" style="background:#e0f2fe;color:#0369a1;font-weight:700">👩‍⚕️ {m.profissional_nome}</span>
+                    ) : (
+                      <span class="muted">—</span>
+                    )}
                   </td>
                   <td>{m.duracao_minutos} min</td>
                   <td class="num">{formatMoney(m.preco)}</td>
@@ -522,6 +557,7 @@ function formatDataBr(ymd: string): string {
   <script is:inline>
     (function () {
       const selServico = document.getElementById('sel-servico');
+      const selProf = document.getElementById('sel-profissional');
       const inpHora = document.getElementById('inp-hora');
       const resumo = document.getElementById('resumo-tempo');
       const grade = document.getElementById('grade-slots');
@@ -529,10 +565,16 @@ function formatDataBr(ymd: string): string {
 
       const fimExp = Number(grade.getAttribute('data-fim-expediente')) || 1080;
       let ocupacoes = [];
+      let profsPorServico = {};
       try {
         ocupacoes = JSON.parse(grade.getAttribute('data-ocupacoes') || '[]');
       } catch {
         ocupacoes = [];
+      }
+      try {
+        profsPorServico = JSON.parse(grade.getAttribute('data-profs-por-servico') || '{}');
+      } catch {
+        profsPorServico = {};
       }
 
       function minToHora(total) {
@@ -541,40 +583,118 @@ function formatDataBr(ymd: string): string {
         return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
       }
 
+      function getServicoSelecionadoId() {
+        return Number(selServico.value) || 0;
+      }
+
       function getDuracaoSelecionada() {
         const opt = selServico.options[selServico.selectedIndex];
         return opt ? Number(opt.getAttribute('data-duracao')) || 30 : 30;
       }
 
-      function cabeNoHorario(inicioMin, duracaoMin) {
+      function popularSelectProfissionais() {
+        if (!selProf) return;
+        const srvId = getServicoSelecionadoId();
+        const lista = Array.isArray(profsPorServico[srvId]) ? profsPorServico[srvId] : [];
+        const valorAnterior = selProf.value;
+        selProf.innerHTML = '<option value="">👩‍⚕️ Qualquer profissional disponível no horário (' + (lista.length || 1) + ')</option>';
+        lista.forEach((p) => {
+          const opt = document.createElement('option');
+          opt.value = String(p.id);
+          opt.textContent = '👩‍⚕️ ' + p.nome + (p.especialidade ? ' (' + p.especialidade + ')' : '');
+          if (String(p.id) === valorAnterior) opt.selected = true;
+          selProf.appendChild(opt);
+        });
+      }
+
+      /**
+       * Verifica quantas vagas (profissionais livres) existem para o serviço/profissional selecionado
+       * no intervalo [inicioMin, inicioMin + duracaoMin).
+       */
+      function avaliarIntervalo(inicioMin, duracaoMin) {
         const fimMin = inicioMin + duracaoMin;
-        if (fimMin > fimExp) return false;
-        for (let i = 0; i < ocupacoes.length; i++) {
-          const oc = ocupacoes[i];
-          if (oc.ini < fimMin && oc.fim > inicioMin) return false;
+        if (fimMin > fimExp) {
+          return { disponivel: false, motivo: 'TEMPO_INSUFICIENTE', vagasLivres: 0, totalProfs: 0 };
         }
-        return true;
+
+        const srvId = getServicoSelecionadoId();
+        const profsDoServico = Array.isArray(profsPorServico[srvId]) ? profsPorServico[srvId] : [];
+        const profEscolhidoId = selProf ? Number(selProf.value) || 0 : 0;
+
+        // Ocupações que encavalam com [inicioMin, fimMin)
+        const conflitos = ocupacoes.filter((oc) => oc.ini < fimMin && oc.fim > inicioMin);
+
+        if (profsDoServico.length > 0) {
+          const ocupadosIds = new Set();
+          let semProfMesmoServico = 0;
+          conflitos.forEach((oc) => {
+            if (oc.profissionalId && Number(oc.profissionalId) > 0) {
+              ocupadosIds.add(Number(oc.profissionalId));
+            } else if (Number(oc.servicoId) === srvId) {
+              semProfMesmoServico += 1;
+            }
+          });
+
+          if (profEscolhidoId > 0) {
+            const livre = !ocupadosIds.has(profEscolhidoId);
+            return {
+              disponivel: livre,
+              motivo: livre ? 'OK' : 'OCUPADO',
+              vagasLivres: livre ? 1 : 0,
+              totalProfs: 1,
+            };
+          }
+
+          const livres = profsDoServico.filter((p) => !ocupadosIds.has(Number(p.id)));
+          const vagas = Math.max(0, livres.length - semProfMesmoServico);
+          return {
+            disponivel: vagas > 0,
+            motivo: vagas > 0 ? 'OK' : 'OCUPADO',
+            vagasLivres: vagas,
+            totalProfs: profsDoServico.length,
+          };
+        }
+
+        // Modo sem profissionais cadastrados (1 vaga global)
+        const temConflito = conflitos.some((oc) => !oc.profissionalId || Number(oc.servicoId) === srvId);
+        return {
+          disponivel: !temConflito,
+          motivo: temConflito ? 'OCUPADO' : 'OK',
+          vagasLivres: temConflito ? 0 : 1,
+          totalProfs: 1,
+        };
       }
 
       function atualizarGradeParaDuracao() {
         const duracao = getDuracaoSelecionada();
-        const botoes = grade.querySelectorAll('.ag-slot.livre');
+        const botoes = grade.querySelectorAll('.ag-slot');
         botoes.forEach((btn) => {
           const min = Number(btn.getAttribute('data-min'));
           const hora = btn.getAttribute('data-hora');
           const statusEl = btn.querySelector('.status-txt');
-          const cabe = cabeNoHorario(min, duracao);
-          if (cabe) {
-            btn.classList.remove('insuficiente');
+          const aval = avaliarIntervalo(min, duracao);
+
+          btn.classList.remove('livre', 'ocupado', 'insuficiente');
+          if (aval.disponivel) {
+            btn.classList.add('livre');
             btn.disabled = false;
+            const txtVagas =
+              aval.totalProfs > 1
+                ? ' (' + aval.vagasLivres + '/' + aval.totalProfs + ' vagas)'
+                : '';
             if (statusEl) {
               statusEl.textContent =
                 inpHora.value === hora
                   ? '✓ Selecionado (' + hora + '–' + minToHora(min + duracao) + ')'
-                  : '🟢 Disponível';
+                  : '🟢 Disponível' + txtVagas;
             }
+          } else if (aval.motivo === 'OCUPADO') {
+            btn.classList.add('ocupado');
+            btn.classList.remove('selecionado');
+            btn.disabled = true;
+            if (statusEl) statusEl.textContent = '🔒 Indisponível';
           } else {
-            btn.classList.add('insuficiente');
+            btn.classList.add('livre', 'insuficiente');
             btn.classList.remove('selecionado');
             btn.disabled = true;
             if (statusEl) statusEl.textContent = '⏳ Tempo insuf. (' + duracao + 'm)';
@@ -584,7 +704,10 @@ function formatDataBr(ymd: string): string {
         if (inpHora.value) {
           const partes = inpHora.value.split(':');
           const m = Number(partes[0]) * 60 + Number(partes[1]);
-          if (resumo) {
+          const avalSel = avaliarIntervalo(m, duracao);
+          if (!avalSel.disponivel) {
+            inpHora.value = '';
+          } else if (resumo) {
             resumo.textContent =
               'Horário selecionado: ' +
               inpHora.value +
@@ -597,19 +720,26 @@ function formatDataBr(ymd: string): string {
         }
       }
 
-      grade.querySelectorAll('.ag-slot.livre').forEach((btn) => {
+      grade.querySelectorAll('.ag-slot').forEach((btn) => {
         btn.addEventListener('click', () => {
           if (btn.disabled) return;
           const hora = btn.getAttribute('data-hora');
           inpHora.value = hora;
-          grade.querySelectorAll('.ag-slot.livre').forEach((b) => b.classList.remove('selecionado'));
+          grade.querySelectorAll('.ag-slot').forEach((b) => b.classList.remove('selecionado'));
           btn.classList.add('selecionado');
           atualizarGradeParaDuracao();
         });
       });
 
-      selServico.addEventListener('change', atualizarGradeParaDuracao);
+      selServico.addEventListener('change', () => {
+        popularSelectProfissionais();
+        atualizarGradeParaDuracao();
+      });
+      if (selProf) {
+        selProf.addEventListener('change', atualizarGradeParaDuracao);
+      }
       inpHora.addEventListener('change', atualizarGradeParaDuracao);
+      popularSelectProfissionais();
       atualizarGradeParaDuracao();
     })();
   </script>

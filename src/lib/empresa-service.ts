@@ -400,6 +400,7 @@ export async function criarServico(
     duracaoMinutos: number;
     preco?: number;
     ativo?: number;
+    profissionaisIds?: number[];
   },
 ) {
   const nome = String(dados.nome ?? '').trim().slice(0, 160);
@@ -416,7 +417,143 @@ export async function criarServico(
     .bind(empresaId, nome, descricao || null, duracao, preco, ativo)
     .first<{ id: number }>();
 
-  return { id: row?.id ?? 0, duracaoMinutos: duracao };
+  const servicoId = row?.id ?? 0;
+  if (servicoId > 0 && Array.isArray(dados.profissionaisIds) && dados.profissionaisIds.length > 0) {
+    await definirProfissionaisDoServico(database, empresaId, servicoId, dados.profissionaisIds);
+  }
+
+  return { id: servicoId, duracaoMinutos: duracao };
+}
+
+export async function criarProfissional(
+  database: any,
+  empresaId: number,
+  dados: {
+    nome: string;
+    especialidade?: string;
+    telefone?: string;
+    email?: string;
+    ativo?: number;
+    servicosIds?: number[];
+  },
+) {
+  const nome = String(dados.nome ?? '').trim().slice(0, 160);
+  const especialidade = String(dados.especialidade ?? '').trim().slice(0, 160);
+  const telefone = String(dados.telefone ?? '').trim().slice(0, 40);
+  const email = String(dados.email ?? '').trim().slice(0, 140);
+  const ativo = dados.ativo === 0 ? 0 : 1;
+
+  const row = await database
+    .prepare(
+      `INSERT INTO profissionais (empresa_id, nome, especialidade, telefone, email, ativo)
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+    )
+    .bind(empresaId, nome, especialidade || null, telefone || null, email || null, ativo)
+    .first<{ id: number }>();
+
+  const profId = row?.id ?? 0;
+  if (profId > 0 && Array.isArray(dados.servicosIds) && dados.servicosIds.length > 0) {
+    await definirServicosDoProfissional(database, empresaId, profId, dados.servicosIds);
+  }
+
+  return { id: profId, nome };
+}
+
+export async function definirProfissionaisDoServico(
+  database: any,
+  empresaId: number,
+  servicoId: number,
+  profissionaisIds: number[],
+): Promise<void> {
+  await database
+    .prepare('DELETE FROM servicos_profissionais WHERE empresa_id = ? AND servico_id = ?')
+    .bind(empresaId, servicoId)
+    .run();
+
+  const unicos = Array.from(new Set(profissionaisIds.map((id) => Number(id)).filter((id) => id > 0)));
+  for (const pid of unicos) {
+    await database
+      .prepare(
+        `INSERT OR IGNORE INTO servicos_profissionais (empresa_id, servico_id, profissional_id)
+         VALUES (?, ?, ?)`,
+      )
+      .bind(empresaId, servicoId, pid)
+      .run();
+  }
+}
+
+export async function definirServicosDoProfissional(
+  database: any,
+  empresaId: number,
+  profissionalId: number,
+  servicosIds: number[],
+): Promise<void> {
+  await database
+    .prepare('DELETE FROM servicos_profissionais WHERE empresa_id = ? AND profissional_id = ?')
+    .bind(empresaId, profissionalId)
+    .run();
+
+  const unicos = Array.from(new Set(servicosIds.map((id) => Number(id)).filter((id) => id > 0)));
+  for (const sid of unicos) {
+    await database
+      .prepare(
+        `INSERT OR IGNORE INTO servicos_profissionais (empresa_id, servico_id, profissional_id)
+         VALUES (?, ?, ?)`,
+      )
+      .bind(empresaId, sid, profissionalId)
+      .run();
+  }
+}
+
+/**
+ * Retorna os profissionais ativos que prestam um determinado serviço:
+ * - Se o serviço possui vínculos na tabela servicos_profissionais, retorna apenas os profissionais ativos vinculados a ele.
+ * - Se o serviço não possui vínculos específicos, mas a empresa tem profissionais ativos cadastrados,
+ *   considera todos os profissionais ativos da empresa aptos a prestar o serviço.
+ * - Se a empresa ainda não cadastrou nenhum profissional, retorna lista vazia (modo agenda única tradicional).
+ */
+export async function listarProfissionaisAtivosPorServico(
+  database: any,
+  empresaId: number,
+  servicoId: number,
+): Promise<Array<{ id: number; nome: string; especialidade: string | null }>> {
+  const { results: vinculados } = await database
+    .prepare(
+      `SELECT p.id, p.nome, p.especialidade
+         FROM servicos_profissionais sp
+         JOIN profissionais p ON p.id = sp.profissional_id AND p.empresa_id = sp.empresa_id
+        WHERE sp.empresa_id = ? AND sp.servico_id = ? AND p.ativo = 1
+        ORDER BY p.nome COLLATE NOCASE ASC`,
+    )
+    .bind(empresaId, servicoId)
+    .all<{ id: number; nome: string; especialidade: string | null }>();
+
+  if (vinculados && vinculados.length > 0) {
+    return vinculados;
+  }
+
+  // Verifica se o serviço tinha algum vínculo (mesmo inativo)
+  const qtdVinculos = await database
+    .prepare('SELECT COUNT(*) AS n FROM servicos_profissionais WHERE empresa_id = ? AND servico_id = ?')
+    .bind(empresaId, servicoId)
+    .first<number>('n');
+
+  if (Number(qtdVinculos || 0) > 0) {
+    return [];
+  }
+
+  // Se nenhum vínculo específico foi definido para o serviço, retorna todos os profissionais ativos da empresa
+  const { results: todos } = await database
+    .prepare(
+      `SELECT id, nome, especialidade
+         FROM profissionais
+        WHERE empresa_id = ? AND ativo = 1
+        ORDER BY nome COLLATE NOCASE ASC`,
+    )
+    .bind(empresaId)
+    .all<{ id: number; nome: string; especialidade: string | null }>();
+
+  return todos || [];
 }
 
 export async function criarAgendamentoLoja(
@@ -425,6 +562,7 @@ export async function criarAgendamentoLoja(
     empresaId: number;
     parceiroId: number;
     servicoId: number;
+    profissionalId?: number | null;
     data: string;
     horaInicio: string;
     observacoes?: string;
@@ -437,6 +575,8 @@ export async function criarAgendamentoLoja(
   ok: boolean;
   erro?: string;
   agendamentoId?: number;
+  profissionalId?: number | null;
+  profissionalNome?: string | null;
   horaInicio?: string;
   horaFim?: string;
   duracaoMinutos?: number;
@@ -504,40 +644,99 @@ export async function criarAgendamentoLoja(
 
   const horaFim = minutosParaHora(fimMin);
 
-  // Verifica se já existe algum agendamento ativo que encavale com o intervalo [horaInicio, horaFim)
-  const conflito = await database
+  // Busca profissionais aptos a prestar este serviço e os agendamentos ativos do dia que encavalam com [horaInicio, horaFim)
+  const profsDoServico = await listarProfissionaisAtivosPorServico(
+    database,
+    dados.empresaId,
+    servico.id,
+  );
+
+  const { results: agendamentosConflitantes } = await database
     .prepare(
-      `SELECT id
+      `SELECT id, servico_id, profissional_id
          FROM agendamentos
         WHERE empresa_id = ?
           AND data = ?
           AND status <> 'CANCELADO'
           AND hora_inicio < ?
           AND hora_fim > ?
-        LIMIT 1`,
+        ORDER BY id ASC`,
     )
     .bind(dados.empresaId, data, horaFim, horaInicio)
-    .first<{ id: number }>();
+    .all<{ id: number; servico_id: number; profissional_id: number | null }>();
 
-  if (conflito) {
-    return {
-      ok: false,
-      erro: 'Este horário conflita com outro agendamento já reservado. Escolha outro horário disponível.',
-    };
+  let profissionalEscolhidoId: number | null = null;
+  let profissionalEscolhidoNome: string | null = null;
+
+  if (profsDoServico.length > 0) {
+    // Conjunto de profissionais que já estão ocupados neste intervalo de horário (em qualquer serviço)
+    const ocupadosIds = new Set<number>();
+    let semProfissionalNoMesmoServico = 0;
+
+    for (const ag of agendamentosConflitantes || []) {
+      if (ag.profissional_id && Number(ag.profissional_id) > 0) {
+        ocupadosIds.add(Number(ag.profissional_id));
+      } else if (Number(ag.servico_id) === servico.id) {
+        semProfissionalNoMesmoServico += 1;
+      }
+    }
+
+    const profReqId = Number(dados.profissionalId) || 0;
+    if (profReqId > 0) {
+      const profValido = profsDoServico.find((p) => p.id === profReqId);
+      if (!profValido) {
+        return {
+          ok: false,
+          erro: 'O profissional selecionado não realiza este serviço.',
+        };
+      }
+      if (ocupadosIds.has(profValido.id)) {
+        return {
+          ok: false,
+          erro: `O(a) profissional ${profValido.nome} já possui outro atendimento neste horário. Escolha outro profissional ou horário.`,
+        };
+      }
+      profissionalEscolhidoId = profValido.id;
+      profissionalEscolhidoNome = profValido.nome;
+    } else {
+      // Alocação automática: escolhe o primeiro profissional habilitado para este serviço que esteja livre neste horário
+      const livres = profsDoServico.filter((p) => !ocupadosIds.has(p.id));
+      if (livres.length <= semProfissionalNoMesmoServico) {
+        return {
+          ok: false,
+          erro: 'Todos os profissionais que realizam este serviço já estão ocupados neste horário. Escolha outro horário disponível.',
+        };
+      }
+      const livre = livres[0];
+      profissionalEscolhidoId = livre.id;
+      profissionalEscolhidoNome = livre.nome;
+    }
+  } else {
+    // Modo tradicional (sem profissionais cadastrados para o serviço): verifica se há conflito geral ou sem profissional atribuído
+    const conflitoGeral = (agendamentosConflitantes || []).find(
+      (ag) => !ag.profissional_id || Number(ag.servico_id) === servico.id,
+    );
+    if (conflitoGeral) {
+      return {
+        ok: false,
+        erro: 'Este horário conflita com outro agendamento já reservado. Escolha outro horário disponível.',
+      };
+    }
   }
 
   const obs = String(dados.observacoes ?? '').trim().slice(0, 400);
   const inserido = await database
     .prepare(
       `INSERT INTO agendamentos
-        (empresa_id, parceiro_id, servico_id, data, hora_inicio, hora_fim, duracao_minutos, preco, observacoes, status, visto_admin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'AGENDADO', 0)
+        (empresa_id, parceiro_id, servico_id, profissional_id, data, hora_inicio, hora_fim, duracao_minutos, preco, observacoes, status, visto_admin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AGENDADO', 0)
        RETURNING id`,
     )
     .bind(
       dados.empresaId,
       dados.parceiroId,
       servico.id,
+      profissionalEscolhidoId,
       data,
       horaInicio,
       horaFim,
@@ -550,6 +749,8 @@ export async function criarAgendamentoLoja(
   return {
     ok: true,
     agendamentoId: inserido?.id,
+    profissionalId: profissionalEscolhidoId,
+    profissionalNome: profissionalEscolhidoNome,
     horaInicio,
     horaFim,
     duracaoMinutos: duracao,
@@ -561,6 +762,8 @@ export type SlotVisaoCliente =
       tipo: 'OCUPADO';
       horaInicio: string;
       horaFim: string;
+      servicoId?: number;
+      profissionalId?: number | null;
     }
   | {
       tipo: 'MEU';
@@ -568,7 +771,10 @@ export type SlotVisaoCliente =
       horaInicio: string;
       horaFim: string;
       duracaoMinutos: number;
+      servicoId: number;
       servicoNome: string;
+      profissionalId: number | null;
+      profissionalNome: string | null;
       preco: number;
       status: string;
       observacoes: string | null;
@@ -576,9 +782,9 @@ export type SlotVisaoCliente =
 
 /**
  * Lista os horários ocupados de um dia sob a ótica de um cliente específico:
- * - Agendamentos do próprio cliente trazem os detalhes do serviço que ele agendou (tipo: 'MEU').
- * - Agendamentos de outros clientes retornam APENAS { tipo: 'OCUPADO', horaInicio, horaFim },
- *   sem expor nome de cliente, serviço, preço ou observações de terceiros.
+ * - Agendamentos do próprio cliente trazem os detalhes do serviço e profissional que ele agendou (tipo: 'MEU').
+ * - Agendamentos de outros clientes retornam APENAS { tipo: 'OCUPADO', horaInicio, horaFim, servicoId, profissionalId },
+ *   sem expor nome de cliente, nome do serviço, preço ou observações de terceiros.
  */
 export async function listarVisaoAgendaCliente(
   database: any,
@@ -590,10 +796,14 @@ export async function listarVisaoAgendaCliente(
 ): Promise<SlotVisaoCliente[]> {
   const { results } = await database
     .prepare(
-      `SELECT a.id, a.parceiro_id, a.hora_inicio, a.hora_fim, a.duracao_minutos,
-              a.preco, a.status, a.observacoes, s.nome AS servico_nome
+      `SELECT a.id, a.parceiro_id, a.servico_id, a.profissional_id,
+              a.hora_inicio, a.hora_fim, a.duracao_minutos,
+              a.preco, a.status, a.observacoes,
+              s.nome AS servico_nome,
+              pr.nome AS profissional_nome
          FROM agendamentos a
          JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
+         LEFT JOIN profissionais pr ON pr.id = a.profissional_id AND pr.empresa_id = a.empresa_id
         WHERE a.empresa_id = ?
           AND a.data = ?
           AND a.status <> 'CANCELADO'
@@ -603,6 +813,8 @@ export async function listarVisaoAgendaCliente(
     .all<{
       id: number;
       parceiro_id: number;
+      servico_id: number;
+      profissional_id: number | null;
       hora_inicio: string;
       hora_fim: string;
       duracao_minutos: number;
@@ -610,6 +822,7 @@ export async function listarVisaoAgendaCliente(
       status: string;
       observacoes: string | null;
       servico_nome: string;
+      profissional_nome: string | null;
     }>();
 
   return results.map((r): SlotVisaoCliente => {
@@ -620,7 +833,10 @@ export async function listarVisaoAgendaCliente(
         horaInicio: r.hora_inicio,
         horaFim: r.hora_fim,
         duracaoMinutos: r.duracao_minutos,
+        servicoId: r.servico_id,
         servicoNome: r.servico_nome,
+        profissionalId: r.profissional_id ?? null,
+        profissionalNome: r.profissional_nome ?? null,
         preco: r.preco,
         status: r.status,
         observacoes: r.observacoes,
@@ -630,6 +846,8 @@ export async function listarVisaoAgendaCliente(
       tipo: 'OCUPADO',
       horaInicio: r.hora_inicio,
       horaFim: r.hora_fim,
+      servicoId: r.servico_id,
+      profissionalId: r.profissional_id ?? null,
     };
   });
 }
@@ -645,6 +863,23 @@ export async function contarNotificacoesAgendamentoBackoffice(
         WHERE empresa_id = ?
           AND visto_admin = 0
           AND status <> 'CANCELADO'`,
+    )
+    .bind(empresaId)
+    .first<number>('n');
+  return Number(n) || 0;
+}
+
+export async function contarNotificacoesPedidosBackoffice(
+  database: any,
+  empresaId: number,
+): Promise<number> {
+  const n = await database
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM loja_pedidos
+        WHERE empresa_id = ?
+          AND COALESCE(visto_admin, 0) = 0
+          AND status <> 'cancelado'`,
     )
     .bind(empresaId)
     .first<number>('n');

@@ -1,6 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { db } from '../../lib/auth';
+import { definirProfissionaisDoServico } from '../../lib/empresa-service';
 import { formatMoney, parseNum, str } from '../../lib/validate';
 
 const u = Astro.locals.user!;
@@ -30,6 +31,10 @@ if (Astro.request.method === 'POST') {
     const duracaoMinutos = Math.max(5, Math.min(720, Math.round(parseNum(f.get('duracao_minutos'), 30))));
     const preco = Math.max(0, parseNum(f.get('preco'), 0));
     const ativo = f.get('ativo') ? 1 : 0;
+    const profissionaisIds = f
+      .getAll('profissionais_ids')
+      .map((v) => Number(v))
+      .filter((v) => v > 0);
 
     if (!nome) {
       erro = 'Informe o nome do serviço / procedimento.';
@@ -44,15 +49,19 @@ if (Astro.request.method === 'POST') {
         )
         .bind(nome, descricao || null, duracaoMinutos, preco, ativo, id, u.empresaId)
         .run();
+      await definirProfissionaisDoServico(db(), u.empresaId, id, profissionaisIds);
       ok = 'Serviço atualizado com sucesso!';
     } else {
-      await db()
+      const novo = await db()
         .prepare(
           `INSERT INTO servicos (empresa_id, nome, descricao, duracao_minutos, preco, ativo)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .bind(u.empresaId, nome, descricao || null, duracaoMinutos, preco, ativo)
-        .run();
+        .first<{ id: number }>();
+      if (novo?.id) {
+        await definirProfissionaisDoServico(db(), u.empresaId, novo.id, profissionaisIds);
+      }
       ok = 'Serviço cadastrado com sucesso!';
     }
   }
@@ -76,6 +85,33 @@ const { results: servicos } = await db()
   .bind(u.empresaId)
   .all<any>();
 
+const { results: profissionais } = await db()
+  .prepare('SELECT id, nome, especialidade, ativo FROM profissionais WHERE empresa_id = ? ORDER BY ativo DESC, nome COLLATE NOCASE ASC')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string; especialidade: string | null; ativo: number }>();
+
+const { results: vinculos } = await db()
+  .prepare(
+    `SELECT sp.servico_id, sp.profissional_id, p.nome AS profissional_nome, p.ativo AS profissional_ativo
+       FROM servicos_profissionais sp
+       JOIN profissionais p ON p.id = sp.profissional_id AND p.empresa_id = sp.empresa_id
+      WHERE sp.empresa_id = ?
+      ORDER BY p.nome COLLATE NOCASE ASC`,
+  )
+  .bind(u.empresaId)
+  .all<{ servico_id: number; profissional_id: number; profissional_nome: string; profissional_ativo: number }>();
+
+const mapaProfPorServico = new Map<number, Array<{ id: number; nome: string; ativo: number }>>();
+for (const v of vinculos || []) {
+  const arr = mapaProfPorServico.get(v.servico_id) || [];
+  arr.push({ id: v.profissional_id, nome: v.profissional_nome, ativo: v.profissional_ativo });
+  mapaProfPorServico.set(v.servico_id, arr);
+}
+
+const profsEditandoIds = editando
+  ? (mapaProfPorServico.get(editando.id) || []).map((p) => p.id)
+  : [];
+
 function formatarDuracao(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -88,6 +124,7 @@ function formatarDuracao(min: number): string {
   <div class="row">
     <h1>🛠️ Cadastro de Serviços e Procedimentos</h1>
     <span class="spacer"></span>
+    <a class="btn sec" href="/profissionais">👩‍⚕️ Cadastrar Profissionais ({profissionais.length})</a>
     <a class="btn sec" href="/agendamentos">📅 Ver Agenda ({emp?.agenda_ativa ? 'Menu Ativo na Loja' : 'Menu Oculto na Loja'})</a>
     <a class="btn sec" href="/loja-config">⚙️ Configurar Menu da Agenda</a>
   </div>
@@ -154,6 +191,37 @@ function formatarDuracao(min: number): string {
         />
       </div>
 
+      <div class="c12">
+        <label>👩‍⚕️ Profissionais que realizam este serviço (habilita agendamentos simultâneos no mesmo horário)</label>
+        {profissionais.length === 0 ? (
+          <div class="muted" style="padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+            Nenhum profissional cadastrado ainda. <a href="/profissionais"><strong>Cadastre seus profissionais aqui</strong></a> para permitir que o mesmo serviço (ou serviços diferentes) seja agendado mais de uma vez no mesmo horário.
+          </div>
+        ) : (
+          <>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+              {profissionais.map((p) => (
+                <label class="check" style="font-size:13.5px;font-weight:600;color:#1e293b;background:#fff;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px">
+                  <input
+                    type="checkbox"
+                    name="profissionais_ids"
+                    value={p.id}
+                    checked={editando ? profsEditandoIds.includes(p.id) : true}
+                  />
+                  <span>
+                    {p.nome}
+                    {p.especialidade ? <span class="muted" style="font-weight:400"> ({p.especialidade})</span> : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <small class="muted" style="display:block;margin-top:4px">
+              Se você selecionar, por exemplo, 2 profissionais para este serviço, até 2 clientes poderão agendar este serviço no mesmo horário.
+            </small>
+          </>
+        )}
+      </div>
+
       <div class="c12 row">
         <button>{editando ? 'Salvar alterações' : '+ Cadastrar serviço'}</button>
         {editando && <a class="btn sec" href="/servicos">Cancelar edição</a>}
@@ -170,6 +238,7 @@ function formatarDuracao(min: number): string {
         <thead>
           <tr>
             <th>Serviço / Procedimento</th>
+            <th>Profissionais / Capacidade Simultânea</th>
             <th>Tempo de Execução</th>
             <th class="num">Valor</th>
             <th>Status</th>
@@ -177,11 +246,33 @@ function formatarDuracao(min: number): string {
           </tr>
         </thead>
         <tbody>
-          {servicos.map((s) => (
+          {servicos.map((s) => {
+            const profsVinc = mapaProfPorServico.get(s.id) || [];
+            const profsAtivos =
+              profsVinc.length > 0
+                ? profsVinc.filter((p) => p.ativo === 1)
+                : profissionais.filter((p) => p.ativo === 1);
+            return (
             <tr>
               <td>
                 <strong>{s.nome}</strong>
                 {s.descricao && <div class="muted" style="font-size:12px">{s.descricao}</div>}
+              </td>
+              <td>
+                {profsAtivos.length > 0 ? (
+                  <div>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:3px">
+                      {profsAtivos.map((p) => (
+                        <span class="tag" style="background:#e0f2fe;color:#0369a1">👩‍⚕️ {p.nome}</span>
+                      ))}
+                    </div>
+                    <small class="muted" style="font-size:11.5px">
+                      Até <strong>{profsAtivos.length}</strong> marcação(ões) no mesmo horário
+                    </small>
+                  </div>
+                ) : (
+                  <span class="muted" style="font-size:12px">1 vaga por horário (<a href="/profissionais">+ profissional</a>)</span>
+                )}
               </td>
               <td>
                 <span class="tag ok">⏱️ {formatarDuracao(s.duracao_minutos)}</span>
@@ -210,7 +301,8 @@ function formatarDuracao(min: number): string {
                 </div>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     )}

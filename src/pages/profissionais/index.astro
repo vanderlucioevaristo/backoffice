@@ -1,0 +1,282 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/auth';
+import { definirServicosDoProfissional } from '../../lib/empresa-service';
+import { str } from '../../lib/validate';
+
+const u = Astro.locals.user!;
+
+let erro = '';
+let ok = '';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? 'salvar');
+
+  if (acao === 'excluir') {
+    const id = Number(f.get('id')) || 0;
+    await db().prepare('DELETE FROM profissionais WHERE id = ? AND empresa_id = ?').bind(id, u.empresaId).run();
+    ok = 'Profissional removido.';
+  } else if (acao === 'alternar') {
+    const id = Number(f.get('id')) || 0;
+    await db()
+      .prepare('UPDATE profissionais SET ativo = CASE WHEN ativo = 1 THEN 0 ELSE 1 END WHERE id = ? AND empresa_id = ?')
+      .bind(id, u.empresaId)
+      .run();
+    ok = 'Status do profissional atualizado.';
+  } else {
+    const id = Number(f.get('id')) || 0;
+    const nome = str(f, 'nome', 160);
+    const especialidade = str(f, 'especialidade', 160);
+    const telefone = str(f, 'telefone', 40);
+    const email = str(f, 'email', 140);
+    const ativo = f.get('ativo') ? 1 : 0;
+    const servicosIds = f
+      .getAll('servicos_ids')
+      .map((v) => Number(v))
+      .filter((v) => v > 0);
+
+    if (!nome) {
+      erro = 'Informe o nome do profissional.';
+    } else if (id > 0) {
+      await db()
+        .prepare(
+          `UPDATE profissionais
+              SET nome = ?, especialidade = ?, telefone = ?, email = ?, ativo = ?
+            WHERE id = ? AND empresa_id = ?`,
+        )
+        .bind(nome, especialidade || null, telefone || null, email || null, ativo, id, u.empresaId)
+        .run();
+      await definirServicosDoProfissional(db(), u.empresaId, id, servicosIds);
+      ok = 'Profissional atualizado com sucesso!';
+    } else {
+      const novo = await db()
+        .prepare(
+          `INSERT INTO profissionais (empresa_id, nome, especialidade, telefone, email, ativo)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+        )
+        .bind(u.empresaId, nome, especialidade || null, telefone || null, email || null, ativo)
+        .first<{ id: number }>();
+      if (novo?.id) {
+        await definirServicosDoProfissional(db(), u.empresaId, novo.id, servicosIds);
+      }
+      ok = 'Profissional cadastrado com sucesso!';
+    }
+  }
+}
+
+const editId = Number(Astro.url.searchParams.get('editar')) || 0;
+const editando = editId
+  ? await db()
+      .prepare('SELECT * FROM profissionais WHERE id = ? AND empresa_id = ?')
+      .bind(editId, u.empresaId)
+      .first<any>()
+  : null;
+
+const { results: servicos } = await db()
+  .prepare('SELECT id, nome, duracao_minutos, ativo FROM servicos WHERE empresa_id = ? ORDER BY ativo DESC, nome ASC')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string; duracao_minutos: number; ativo: number }>();
+
+const { results: profissionais } = await db()
+  .prepare('SELECT * FROM profissionais WHERE empresa_id = ? ORDER BY ativo DESC, nome COLLATE NOCASE ASC')
+  .bind(u.empresaId)
+  .all<any>();
+
+const { results: vinculos } = await db()
+  .prepare(
+    `SELECT sp.profissional_id, sp.servico_id, s.nome AS servico_nome
+       FROM servicos_profissionais sp
+       JOIN servicos s ON s.id = sp.servico_id AND s.empresa_id = sp.empresa_id
+      WHERE sp.empresa_id = ?
+      ORDER BY s.nome COLLATE NOCASE ASC`,
+  )
+  .bind(u.empresaId)
+  .all<{ profissional_id: number; servico_id: number; servico_nome: string }>();
+
+const mapaServicosPorProf = new Map<number, Array<{ id: number; nome: string }>>();
+for (const v of vinculos || []) {
+  const arr = mapaServicosPorProf.get(v.profissional_id) || [];
+  arr.push({ id: v.servico_id, nome: v.servico_nome });
+  mapaServicosPorProf.set(v.profissional_id, arr);
+}
+
+const servicosEditandoIds = editando
+  ? (mapaServicosPorProf.get(editando.id) || []).map((s) => s.id)
+  : [];
+---
+<Layout title="Cadastro de Profissionais" active="profissionais">
+  <div class="row">
+    <h1>👩‍⚕️ Cadastro de Profissionais da Agenda</h1>
+    <span class="spacer"></span>
+    <a class="btn sec" href="/servicos">🛠️ Cadastrar Serviços</a>
+    <a class="btn sec" href="/agendamentos">📅 Ver Agenda</a>
+  </div>
+
+  {erro && <div class="msg err">{erro}</div>}
+  {ok && <div class="msg ok">{ok}</div>}
+
+  <div class="card">
+    <h2>{editando ? `Editar Profissional #${editando.id}` : 'Novo Profissional'}</h2>
+    <p class="muted" style="margin-top:0">
+      Cadastre os profissionais que realizam atendimentos. Quando um serviço possui <strong>2 ou mais profissionais</strong> vinculados, o mesmo serviço pode ser agendado <strong>mais de uma vez no mesmo horário</strong> (uma marcação por profissional disponível). Serviços diferentes prestados por profissionais diferentes também podem ser agendados simultaneamente.
+    </p>
+
+    <form method="post" class="grid">
+      <input type="hidden" name="_acao" value="salvar" />
+      {editando && <input type="hidden" name="id" value={editando.id} />}
+
+      <div class="c4">
+        <label>Nome do Profissional *</label>
+        <input
+          name="nome"
+          required
+          value={editando?.nome ?? ''}
+          placeholder="Ex: Ana Paula, Carlos Eduardo, Dra. Mariana..."
+        />
+      </div>
+
+      <div class="c3">
+        <label>Especialidade / Função (opcional)</label>
+        <input
+          name="especialidade"
+          value={editando?.especialidade ?? ''}
+          placeholder="Ex: Cabeleireiro, Fisioterapeuta, Técnico..."
+        />
+      </div>
+
+      <div class="c2">
+        <label>Telefone / Celular</label>
+        <input
+          name="telefone"
+          value={editando?.telefone ?? ''}
+          placeholder="(11) 99999-9999"
+        />
+      </div>
+
+      <div class="c3">
+        <label>E-mail (opcional)</label>
+        <input
+          type="email"
+          name="email"
+          value={editando?.email ?? ''}
+          placeholder="profissional@empresa.com"
+        />
+      </div>
+
+      <div class="c12">
+        <label>Serviços / Procedimentos que este profissional realiza</label>
+        {servicos.length === 0 ? (
+          <div class="muted" style="padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+            Nenhum serviço cadastrado ainda. <a href="/servicos">Cadastre os serviços aqui</a> ou salve o profissional (se nenhum serviço específico for marcado, o profissional poderá atender qualquer serviço ativo).
+          </div>
+        ) : (
+          <>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+              {servicos.map((s) => (
+                <label class="check" style="font-size:13.5px;font-weight:600;color:#1e293b;background:#fff;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px">
+                  <input
+                    type="checkbox"
+                    name="servicos_ids"
+                    value={s.id}
+                    checked={editando ? servicosEditandoIds.includes(s.id) : true}
+                  />
+                  <span>{s.nome} <span class="muted" style="font-weight:400">({s.duracao_minutos}m)</span></span>
+                </label>
+              ))}
+            </div>
+            <small class="muted" style="display:block;margin-top:4px">
+              Marque os serviços que este profissional atende. Você também pode vincular profissionais diretamente na tela de <a href="/servicos"><strong>Serviços</strong></a>.
+            </small>
+          </>
+        )}
+      </div>
+
+      <div class="c12">
+        <label class="check">
+          <input type="checkbox" name="ativo" value="1" checked={editando ? editando.ativo === 1 : true} />
+          Profissional ativo para receber agendamentos
+        </label>
+      </div>
+
+      <div class="c12 row">
+        <button>{editando ? 'Salvar alterações' : '+ Cadastrar profissional'}</button>
+        {editando && <a class="btn sec" href="/profissionais">Cancelar edição</a>}
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Profissionais Cadastrados ({profissionais.length})</h2>
+    {profissionais.length === 0 ? (
+      <p class="muted">Nenhum profissional cadastrado ainda. Cadastre acima para habilitar múltiplos atendimentos simultâneos na agenda.</p>
+    ) : (
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Profissional</th>
+              <th>Especialidade / Contato</th>
+              <th>Serviços que Realiza</th>
+              <th>Status</th>
+              <th style="text-align:right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {profissionais.map((p) => {
+              const srvs = mapaServicosPorProf.get(p.id) || [];
+              return (
+                <tr>
+                  <td>
+                    <strong>👩‍⚕️ {p.nome}</strong>
+                  </td>
+                  <td>
+                    <div>{p.especialidade || '—'}</div>
+                    {(p.telefone || p.email) && (
+                      <div class="muted" style="font-size:12px">
+                        {[p.telefone, p.email].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {srvs.length > 0 ? (
+                      <div style="display:flex;gap:4px;flex-wrap:wrap">
+                        {srvs.map((s) => (
+                          <span class="tag" style="background:#e0f2fe;color:#0369a1">{s.nome}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span class="muted" style="font-size:12.5px">Todos os serviços sem restrição</span>
+                    )}
+                  </td>
+                  <td>
+                    {p.ativo === 1 ? (
+                      <span class="tag ok" style="background:#dcfce7;color:#166534">Ativo</span>
+                    ) : (
+                      <span class="tag off">Inativo</span>
+                    )}
+                  </td>
+                  <td style="text-align:right">
+                    <div class="row" style="justify-content:flex-end;gap:6px">
+                      <a class="btn sm sec" href={`/profissionais?editar=${p.id}`}>Editar</a>
+                      <form method="post" style="display:inline">
+                        <input type="hidden" name="_acao" value="alternar" />
+                        <input type="hidden" name="id" value={p.id} />
+                        <button class="sm sec">{p.ativo === 1 ? 'Pausar' : 'Ativar'}</button>
+                      </form>
+                      <form method="post" style="display:inline" onsubmit="return confirm('Excluir este profissional?')">
+                        <input type="hidden" name="_acao" value="excluir" />
+                        <input type="hidden" name="id" value={p.id} />
+                        <button class="sm dg">Excluir</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+</Layout>

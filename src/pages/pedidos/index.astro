@@ -4,6 +4,20 @@ import { db } from '../../lib/auth';
 import { formatMoney, formatDoc } from '../../lib/validate';
 
 const u = Astro.locals.user!;
+
+let msgOk = '';
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const acao = String(f.get('_acao') ?? '');
+  if (acao === 'marcar_vistos') {
+    await db()
+      .prepare('UPDATE loja_pedidos SET visto_admin = 1 WHERE empresa_id = ? AND COALESCE(visto_admin, 0) = 0')
+      .bind(u.empresaId)
+      .run();
+    msgOk = 'Notificações de novos pedidos marcadas como visualizadas.';
+  }
+}
+
 const sp = Astro.url.searchParams;
 const q = (sp.get('q') ?? '').trim().slice(0, 80);
 const clienteId = Number(sp.get('cliente')) || 0;
@@ -50,19 +64,22 @@ const resumo = await db()
   .prepare(
     `SELECT COUNT(*) AS total,
             COALESCE(SUM(CASE WHEN p.status <> 'cancelado' THEN p.valor_total ELSE 0 END), 0) AS soma_ativos,
-            COALESCE(SUM(CASE WHEN p.status = 'novo' THEN 1 ELSE 0 END), 0) AS novos
+            COALESCE(SUM(CASE WHEN p.status = 'novo' THEN 1 ELSE 0 END), 0) AS novos,
+            COALESCE(SUM(CASE WHEN p.status <> 'cancelado' AND COALESCE(p.visto_admin, 0) = 0 THEN 1 ELSE 0 END), 0) AS nao_vistos
        FROM loja_pedidos p
        JOIN parceiros c ON c.id = p.parceiro_id AND c.empresa_id = p.empresa_id
       WHERE ${W}`,
   )
   .bind(...args)
-  .first<{ total: number; soma_ativos: number; novos: number }>();
+  .first<{ total: number; soma_ativos: number; novos: number; nao_vistos: number }>();
 
 const total = resumo?.total ?? 0;
+const qtdNaoVistos = Number(resumo?.nao_vistos ?? 0);
 
 const { results } = await db()
   .prepare(
     `SELECT p.id, p.valor_total, p.status, p.origem, p.criado_em,
+            COALESCE(p.visto_admin, 1) AS visto_admin,
             c.id AS cliente_id, c.nome AS cliente_nome, c.documento AS cliente_doc,
             COALESCE(c.celular, c.telefone) AS cliente_fone,
             (SELECT COUNT(*) FROM loja_pedidos_itens i WHERE i.pedido_id = p.id AND i.empresa_id = p.empresa_id) AS qtd_itens
@@ -94,8 +111,17 @@ const statusLabel: Record<string, { txt: string; cls: string }> = {
   <div class="row">
     <h1>Pedidos de Clientes</h1>
     <span class="spacer"></span>
+    {qtdNaoVistos > 0 && (
+      <form method="post" style="margin:0">
+        <input type="hidden" name="_acao" value="marcar_vistos" />
+        <button class="sm" style="background:#dc2626;border-color:#dc2626;font-weight:700">
+          🔔 Marcar {qtdNaoVistos} novo(s) pedido(s) como vistos
+        </button>
+      </form>
+    )}
     <a class="btn" href="/pedidos/novo">+ Novo pedido manual</a>
   </div>
+  {msgOk && <div class="msg ok">{msgOk}</div>}
   {ok === 'salvo' && <div class="msg ok">Pedido registrado e estoque baixado com sucesso.</div>}
   {ok === 'status' && <div class="msg ok">Situação do pedido atualizada.</div>}
 
@@ -150,9 +176,20 @@ const statusLabel: Record<string, { txt: string; cls: string }> = {
         {results.length === 0 && <tr><td colspan="8" class="muted">Nenhum pedido encontrado.</td></tr>}
         {results.map((r) => {
           const st = statusLabel[r.status] ?? { txt: r.status, cls: 'tag' };
+          const ehNovoNaoVisto = Number(r.visto_admin ?? 1) === 0 && r.status !== 'cancelado';
           return (
-            <tr>
-              <td><a href={`/pedidos/${r.id}`}><strong>#{r.id}</strong></a></td>
+            <tr style={ehNovoNaoVisto ? 'background:#fff1f2' : ''}>
+              <td>
+                <a href={`/pedidos/${r.id}`}><strong>#{r.id}</strong></a>
+                {ehNovoNaoVisto && (
+                  <span
+                    class="tag"
+                    style="background:#fee2e2;color:#b91c1c;font-weight:800;margin-left:6px"
+                  >
+                    🔔 NOVO
+                  </span>
+                )}
+              </td>
               <td class="muted" style="white-space:nowrap">{r.criado_em}</td>
               <td>
                 <a href={`/clientes/${r.cliente_id}`}>{r.cliente_nome}</a>

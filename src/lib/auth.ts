@@ -218,6 +218,7 @@ export async function ensureSchema(): Promise<void> {
         status TEXT NOT NULL DEFAULT 'novo',
         origem TEXT NOT NULL DEFAULT 'LOJA',
         valor_desconto REAL NOT NULL DEFAULT 0,
+        visto_admin INTEGER NOT NULL DEFAULT 0,
         atualizado_em TEXT
       )`,
       `CREATE TABLE IF NOT EXISTS loja_pedidos_itens (
@@ -329,6 +330,22 @@ export async function ensureSchema(): Promise<void> {
         criado_em TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (empresa_id, parceiro_id, produto_id)
       )`,
+      `CREATE TABLE IF NOT EXISTS profissionais (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        nome TEXT NOT NULL,
+        especialidade TEXT,
+        telefone TEXT,
+        email TEXT,
+        ativo INTEGER NOT NULL DEFAULT 1,
+        criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS servicos_profissionais (
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        servico_id INTEGER NOT NULL REFERENCES servicos(id) ON DELETE CASCADE,
+        profissional_id INTEGER NOT NULL REFERENCES profissionais(id) ON DELETE CASCADE,
+        PRIMARY KEY (empresa_id, servico_id, profissional_id)
+      )`,
     ];
 
     for (const sql of tables) {
@@ -422,6 +439,8 @@ export async function ensureSchema(): Promise<void> {
       "ALTER TABLE loja_visitas_metricas ADD COLUMN regiao TEXT",
       "ALTER TABLE loja_visitas_metricas ADD COLUMN latitude REAL",
       "ALTER TABLE loja_visitas_metricas ADD COLUMN longitude REAL",
+      "ALTER TABLE agendamentos ADD COLUMN profissional_id INTEGER REFERENCES profissionais(id) ON DELETE SET NULL",
+      "ALTER TABLE loja_pedidos ADD COLUMN visto_admin INTEGER NOT NULL DEFAULT 1",
     ];
     for (const alt of alters) {
       await database.prepare(alt).run().catch(() => {});

@@ -1,20 +1,41 @@
 ---
 import '../styles/global.css';
 import { db } from '../lib/auth';
-import { contarNotificacoesAgendamentoBackoffice, IDLE_TIMEOUT_MS } from '../lib/empresa-service';
+import {
+  contarNotificacoesAgendamentoBackoffice,
+  contarNotificacoesPedidosBackoffice,
+  IDLE_TIMEOUT_MS,
+} from '../lib/empresa-service';
 
 interface Props { title: string; active?: string; bare?: boolean }
 const { title, active = '', bare = false } = Astro.props;
 const user = Astro.locals.user;
 
 let qtdAgendamentosNovos = 0;
+let qtdPedidosNovos = 0;
 if (!bare && user) {
   try {
-    qtdAgendamentosNovos = await contarNotificacoesAgendamentoBackoffice(db(), user.empresaId);
+    [qtdAgendamentosNovos, qtdPedidosNovos] = await Promise.all([
+      contarNotificacoesAgendamentoBackoffice(db(), user.empresaId),
+      contarNotificacoesPedidosBackoffice(db(), user.empresaId),
+    ]);
   } catch {
     qtdAgendamentosNovos = 0;
+    qtdPedidosNovos = 0;
   }
 }
+const qtdNotificacoesTotal = qtdAgendamentosNovos + qtdPedidosNovos;
+const linkSininho =
+  qtdPedidosNovos > 0 && qtdAgendamentosNovos === 0 ? '/pedidos' : '/agendamentos';
+const tituloSininho =
+  qtdNotificacoesTotal > 0
+    ? [
+        qtdAgendamentosNovos > 0 ? `${qtdAgendamentosNovos} agendamento(s) novo(s)` : '',
+        qtdPedidosNovos > 0 ? `${qtdPedidosNovos} pedido(s) novo(s)` : '',
+      ]
+        .filter(Boolean)
+        .join(' e ') + ' aguardando visualização!'
+    : 'Nenhum novo agendamento ou pedido pendente de visualização';
 ---
 <!doctype html>
 <html lang="pt-BR">
@@ -92,6 +113,26 @@ if (!bare && user) {
         90%  { transform: rotate(-3deg); }
         100% { transform: rotate(0deg); }
       }
+      .top nav a.menu-alert-red {
+        color: #ff4d4f !important;
+        font-weight: 800;
+        animation: menuPulseRedText 1.2s ease-in-out infinite;
+      }
+      .top nav a.menu-alert-red:hover {
+        color: #ff7875 !important;
+      }
+      @keyframes menuPulseRedText {
+        0%, 100% {
+          color: #ff4d4f;
+          text-shadow: 0 0 8px rgba(255, 77, 79, 0.75);
+          opacity: 1;
+        }
+        50% {
+          color: #fca5a5;
+          text-shadow: 0 0 2px rgba(255, 77, 79, 0.2);
+          opacity: 0.55;
+        }
+      }
     </style>
   </head>
   <body>
@@ -107,9 +148,18 @@ if (!bare && user) {
             <a href="/categorias" class={active === 'categorias' ? 'on' : ''}>Categorias</a>
             <a href="/produtos" class={active === 'produtos' ? 'on' : ''}>Produtos</a>
             <a href="/servicos" class={active === 'servicos' ? 'on' : ''}>Serviços</a>
-            <a href="/agendamentos" class={active === 'agendamentos' ? 'on' : ''}>Agenda</a>
+            <a href="/profissionais" class={active === 'profissionais' ? 'on' : ''}>Profissionais</a>
+            <a
+              href="/agendamentos"
+              class={`${active === 'agendamentos' ? 'on' : ''} ${qtdAgendamentosNovos > 0 ? 'menu-alert-red' : ''}`.trim()}
+              title={qtdAgendamentosNovos > 0 ? `${qtdAgendamentosNovos} novo(s) agendamento(s) ainda não visto(s)!` : undefined}
+            >Agenda</a>
             <a href="/ofertas" class={active === 'ofertas' ? 'on' : ''}>Ofertas</a>
-            <a href="/pedidos" class={active === 'pedidos' ? 'on' : ''}>Pedidos</a>
+            <a
+              href="/pedidos"
+              class={`${active === 'pedidos' ? 'on' : ''} ${qtdPedidosNovos > 0 ? 'menu-alert-red' : ''}`.trim()}
+              title={qtdPedidosNovos > 0 ? `${qtdPedidosNovos} novo(s) pedido(s) ainda não visto(s)!` : undefined}
+            >Pedidos</a>
             <a href="/notas-entrada" class={active === 'notas' ? 'on' : ''}>Entrada de NF</a>
             <a href="/estoque" class={active === 'estoque' ? 'on' : ''}>Estoque</a>
             {user?.perfil === 'admin' && (
@@ -127,21 +177,17 @@ if (!bare && user) {
           </nav>
           <div class="who">
             <a
-              href="/agendamentos"
+              href={linkSininho}
               id="bell-agendamentos"
-              class={`bell-link ${qtdAgendamentosNovos > 0 ? 'has-new' : ''}`}
-              title={
-                qtdAgendamentosNovos > 0
-                  ? `${qtdAgendamentosNovos} agendamento(s) novo(s) na loja!`
-                  : 'Nenhum novo agendamento pendente de visualização'
-              }
+              class={`bell-link ${qtdNotificacoesTotal > 0 ? 'has-new' : ''}`}
+              title={tituloSininho}
             >
               <svg class="bell-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
               </svg>
-              {qtdAgendamentosNovos > 0 && (
-                <span class="bell-badge" id="bell-badge">{qtdAgendamentosNovos}</span>
+              {qtdNotificacoesTotal > 0 && (
+                <span class="bell-badge" id="bell-badge">{qtdNotificacoesTotal}</span>
               )}
             </a>
             <button

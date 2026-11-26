@@ -76,15 +76,23 @@ const diasAtivosResumo = DIAS_SEMANA_LABELS.filter((d) =>
 
 const filtroData = Astro.url.searchParams.get('data') ?? '';
 const filtroStatus = Astro.url.searchParams.get('status') ?? '';
+const filtroProf = Number(Astro.url.searchParams.get('profissional')) || 0;
+
+const { results: profissionaisLista } = await db()
+  .prepare('SELECT id, nome FROM profissionais WHERE empresa_id = ? ORDER BY nome COLLATE NOCASE ASC')
+  .bind(u.empresaId)
+  .all<{ id: number; nome: string }>();
 
 let sql = `
   SELECT a.id, a.data, a.hora_inicio, a.hora_fim, a.duracao_minutos, a.preco,
          a.observacoes, a.status, a.visto_admin, a.criado_em,
          s.nome AS servico_nome,
+         pr.nome AS profissional_nome,
          p.nome AS cliente_nome, p.documento AS cliente_doc, p.celular AS cliente_celular, p.telefone AS cliente_telefone, p.email AS cliente_email
     FROM agendamentos a
     JOIN servicos s ON s.id = a.servico_id AND s.empresa_id = a.empresa_id
     JOIN parceiros p ON p.id = a.parceiro_id AND p.empresa_id = a.empresa_id
+    LEFT JOIN profissionais pr ON pr.id = a.profissional_id AND pr.empresa_id = a.empresa_id
    WHERE a.empresa_id = ?
 `;
 const binds: unknown[] = [u.empresaId];
@@ -96,6 +104,10 @@ if (filtroData) {
 if (filtroStatus) {
   sql += ' AND a.status = ?';
   binds.push(filtroStatus);
+}
+if (filtroProf > 0) {
+  sql += ' AND a.profissional_id = ?';
+  binds.push(filtroProf);
 }
 sql += ' ORDER BY a.data DESC, a.hora_inicio ASC';
 
@@ -121,6 +133,7 @@ function formatDataBr(ymd: string): string {
         {emp?.agenda_ativa ? '👁️ Ocultar Menu Agenda na Loja' : '🚀 Exibir Menu Agenda na Loja'}
       </button>
     </form>
+    <a class="btn sec" href="/profissionais">👩‍⚕️ Cadastrar Profissionais ({profissionaisLista.length})</a>
     <a class="btn sec" href="/servicos">🛠️ Cadastrar Serviços e Tempos</a>
     <a class="btn sec" href={`/loja/${emp?.codigo}/agenda`} target="_blank">Abrir Agenda na Loja ↗</a>
   </div>
@@ -179,9 +192,18 @@ function formatDataBr(ymd: string): string {
           <option value="CANCELADO" selected={filtroStatus === 'CANCELADO'}>Cancelado</option>
         </select>
       </div>
+      <div>
+        <label>Profissional</label>
+        <select name="profissional">
+          <option value="">Todos os profissionais</option>
+          {profissionaisLista.map((pr) => (
+            <option value={pr.id} selected={filtroProf === pr.id}>{pr.nome}</option>
+          ))}
+        </select>
+      </div>
       <div style="align-self:flex-end">
         <button class="sec">Filtrar</button>
-        {(filtroData || filtroStatus) && <a class="btn sec" href="/agendamentos" style="margin-left:6px">Limpar</a>}
+        {(filtroData || filtroStatus || filtroProf) && <a class="btn sec" href="/agendamentos" style="margin-left:6px">Limpar</a>}
       </div>
     </form>
   </div>
@@ -196,6 +218,7 @@ function formatDataBr(ymd: string): string {
           <tr>
             <th>Data e Horário</th>
             <th>Serviço / Tempo</th>
+            <th>Profissional</th>
             <th>Cliente</th>
             <th class="num">Valor</th>
             <th>Status</th>
@@ -218,6 +241,13 @@ function formatDataBr(ymd: string): string {
                 <strong>{a.servico_nome}</strong>
                 <div class="muted" style="font-size:12px">Duração: {a.duracao_minutos} min</div>
                 {a.observacoes && <div class="muted" style="font-size:12px">Obs: {a.observacoes}</div>}
+              </td>
+              <td>
+                {a.profissional_nome ? (
+                  <span class="tag" style="background:#e0f2fe;color:#0369a1;font-weight:700">👩‍⚕️ {a.profissional_nome}</span>
+                ) : (
+                  <span class="muted">—</span>
+                )}
               </td>
               <td>
                 <strong>{a.cliente_nome}</strong>

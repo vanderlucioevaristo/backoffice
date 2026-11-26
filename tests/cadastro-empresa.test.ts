@@ -13,9 +13,11 @@ import {
   criarSessaoClienteLoja,
   validarERenovarSessaoClienteLoja,
   criarServico,
+  criarProfissional,
   criarAgendamentoLoja,
   listarVisaoAgendaCliente,
   contarNotificacoesAgendamentoBackoffice,
+  contarNotificacoesPedidosBackoffice,
   calcularFreteCorreios,
   gerarPayloadPixNubank,
   gerarUrlLinkIntegradoInfinitePay,
@@ -780,5 +782,110 @@ describe('Cadastro de Empresa com Usuário (Banco Temporário Isolado)', () => {
     assert.equal(desfav1.ok, true);
     assert.equal(desfav1.favoritado, false);
     assert.equal(desfav1.totalFavoritos, 1);
+  });
+
+  test('agenda multi-profissional: permite múltiplos agendamentos do mesmo serviço ou serviços diferentes no mesmo horário conforme profissionais disponíveis', async () => {
+    const cad = await registrarEmpresaComUsuario(ctx.d1, {
+      codigo: 'clinica-multiprof',
+      razao: 'CLINICA MULTI PROFISSIONAIS LTDA',
+      nome: 'Gestor Multi',
+      login: 'gestormulti',
+      senha: 'SenhaForte123!',
+    });
+    assert.equal(cad.ok, true);
+    const empId = cad.empresaId!;
+
+    const cli1 = await ctx.d1
+      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente 1', 1) RETURNING id")
+      .bind(empId)
+      .first<{ id: number }>();
+    const cli2 = await ctx.d1
+      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente 2', 1) RETURNING id")
+      .bind(empId)
+      .first<{ id: number }>();
+    const cli3 = await ctx.d1
+      .prepare("INSERT INTO parceiros (empresa_id, tipo_pessoa, eh_cliente, nome, ativo) VALUES (?, 'F', 1, 'Cliente 3', 1) RETURNING id")
+      .bind(empId)
+      .first<{ id: number }>();
+
+    // Cadastra 3 profissionais: Prof A e Prof B fazem Corte; Prof C faz Massagem
+    const profA = await criarProfissional(ctx.d1, empId, { nome: 'Profissional Ana', especialidade: 'Cabeleireira' });
+    const profB = await criarProfissional(ctx.d1, empId, { nome: 'Profissional Bruno', especialidade: 'Cabeleireiro' });
+    const profC = await criarProfissional(ctx.d1, empId, { nome: 'Profissional Carla', especialidade: 'Massoterapeuta' });
+
+    const srvCorte = await criarServico(ctx.d1, empId, {
+      nome: 'Corte de Cabelo',
+      duracaoMinutos: 30,
+      preco: 60,
+      profissionaisIds: [profA.id, profB.id],
+    });
+    const srvMassagem = await criarServico(ctx.d1, empId, {
+      nome: 'Massagem Relaxante',
+      duracaoMinutos: 45,
+      preco: 120,
+      profissionaisIds: [profC.id],
+    });
+
+    // 1ª marcação de Corte às 14:00 (2026-11-26, quinta-feira) -> deve alocar Profissional Ana
+    const ag1 = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli1!.id,
+      servicoId: srvCorte.id,
+      data: '2026-11-26',
+      horaInicio: '14:00',
+    });
+    assert.equal(ag1.ok, true);
+    assert.equal(ag1.profissionalId, profA.id);
+
+    // 2ª marcação do MESMO serviço (Corte) no MESMO horário (14:00) -> deve permitir e alocar Profissional Bruno
+    const ag2 = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli2!.id,
+      servicoId: srvCorte.id,
+      data: '2026-11-26',
+      horaInicio: '14:00',
+    });
+    assert.equal(ag2.ok, true);
+    assert.equal(ag2.profissionalId, profB.id);
+
+    // 3ª marcação do MESMO serviço (Corte) no MESMO horário (14:00) -> deve BLOQUEAR pois os 2 profissionais de Corte já estão ocupados
+    const ag3 = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli3!.id,
+      servicoId: srvCorte.id,
+      data: '2026-11-26',
+      horaInicio: '14:00',
+    });
+    assert.equal(ag3.ok, false);
+    assert.match(ag3.erro || '', /profissionais.*ocupados/i);
+
+    // Marcação de SERVIÇO DIFERENTE (Massagem) prestado por PROFISSIONAL DIFERENTE (Profissional Carla) no MESMO horário (14:00) -> deve PERMITIR
+    const agMassagem = await criarAgendamentoLoja(ctx.d1, {
+      empresaId: empId,
+      parceiroId: cli3!.id,
+      servicoId: srvMassagem.id,
+      data: '2026-11-26',
+      horaInicio: '14:00',
+    });
+    assert.equal(agMassagem.ok, true);
+    assert.equal(agMassagem.profissionalId, profC.id);
+
+    // Verifica notificações de novos pedidos ainda não vistos pelo admin (mesmo esquema da agenda)
+    assert.equal(await contarNotificacoesPedidosBackoffice(ctx.d1, empId), 0);
+    const novoPed = await ctx.d1
+      .prepare(
+        `INSERT INTO loja_pedidos (empresa_id, parceiro_id, valor_total, status, origem, visto_admin)
+         VALUES (?, ?, 199.9, 'novo', 'LOJA', 0) RETURNING id`,
+      )
+      .bind(empId, cli1!.id)
+      .first<{ id: number }>();
+    assert.ok(novoPed?.id);
+    assert.equal(await contarNotificacoesPedidosBackoffice(ctx.d1, empId), 1);
+
+    await ctx.d1
+      .prepare('UPDATE loja_pedidos SET visto_admin = 1 WHERE id = ? AND empresa_id = ?')
+      .bind(novoPed!.id, empId)
+      .run();
+    assert.equal(await contarNotificacoesPedidosBackoffice(ctx.d1, empId), 0);
   });
 });
